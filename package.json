@@ -1,0 +1,59 @@
+{
+  "name": "yappychat",
+  "productName": "YappyChat",
+  "version": "0.15.0",
+  "description": "YappyChat - moderation-first Twitch chat client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.yappychat.app",
+    "productName": "YappyChat",
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "YappyChat-Setup-${version}.${ext}"
+    },
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "differentialPackage": true,
+      "artifactName": "YappyChat-Setup-${version}.${ext}",
+      "shortcutName": "YappyChat"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yappychat",
+        "repo": "YappyChat",
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "build/icon.png",
+      "build/icon.ico",
+      "!**/*.map",
+      "!**/test/**",
+      "!**/*.md"
+    ],
+    "afterPack": "build/afterPack.js"
+  }
+}

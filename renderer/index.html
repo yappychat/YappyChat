@@ -1,0 +1,109 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-src http://localhost:* https:; connect-src wss://irc-ws.chat.twitch.tv wss://eventsub.wss.twitch.tv">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YappyChat</title>
+<link rel="stylesheet" href="perks.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="previews.css">
+</head>
+<body>
+<section id="login" class="login hidden">
+  <div class="login-card">
+    <div id="loginYappy" class="login-hero"></div>
+    <div class="logo"><span>YappyChat</span></div>
+    <p class="lead">Moderate Twitch chat faster, with Yappy keeping an eye out.</p>
+    <div id="dcBox" class="dcbox hidden" role="group" aria-labelledby="dcLabel">
+      <div class="dcl" id="dcLabel">Twitch opened in your browser. Press Authorize there.</div>
+      <div class="row"><button type="button" class="btn" id="dcOpen">Open Twitch again</button><button type="button" class="btn" id="dcCancel">Cancel</button></div>
+      <details class="dcmore"><summary>Twitch is asking for a code?</summary><div class="dcs">Type this code on the Twitch page:</div><div class="dccode" id="dcCode" aria-live="polite">····-····</div><button type="button" class="btn sm" id="dcCopy">Copy code</button></details>
+    </div>
+    <label class="chk loginmod"><input type="checkbox" id="loginNotMod"> I only chat and don't moderate <span class="faint">(asks Twitch for fewer permissions)</span></label>
+    <button id="twitchLogin" class="btn primary big">Continue with Twitch</button>
+    <p class="hint lstatus" id="loginStatus" role="status" aria-live="polite"></p>
+  </div>
+  <div class="loginupd" id="loginUpd" role="status" aria-live="polite"><span class="spin" id="luSpin"></span><span id="luText">Checking for updates…</span><button type="button" class="btn sm hidden" id="luGo">Restart to update</button></div>
+</section>
+
+<div id="app" class="app hidden">
+  <header class="top">
+    <button id="brandBtn" class="brand" data-tip="Support Yappy (opens the tip page)"><span class="brandfx" id="brandFx"></span><span id="brandMark" class="brandmark"></span><span class="brandtxt">YappyChat</span></button>
+    <div class="tabbar"><button id="tabL" class="ibtn hidden" data-ico="chev" data-tip="Scroll tabs left"></button><nav id="tabs" class="tabs"></nav><button id="tabR" class="ibtn hidden" data-ico="chev" data-tip="Scroll tabs right"></button><button id="tabMore" class="ibtn hidden" data-ico="down" data-tip="Channels that don't fit" aria-label="Channels that don't fit"></button></div>
+    <button id="tabSort" class="ibtn" data-ico="sortlr" data-tip="Sort tabs" aria-label="Sort tabs"></button>
+    <button id="addTab" class="ibtn" data-ico="plus" data-tip="Add channel. Ctrl+K jumps to one"></button>
+    <div class="spacer"></div>
+    <button id="updBtn" class="updbtn hidden" aria-live="polite"><span class="updl" id="updL">Update available</span><span class="updi" id="updI"></span></button>
+    <button id="pipBtn" class="ibtn" data-ico="stream" data-tip="Stream window"></button>
+    <button id="splitBtn" class="ibtn" data-ico="grid" data-tip="Split view (Ctrl+Shift+E)"></button>
+    <button id="sideBtn" class="ibtn" data-tip="Activity rail (Ctrl+Shift+A)"></button>
+    <button id="layBtn" class="ibtn" data-ico="layout" data-tip="Window layouts (Ctrl+Shift+L). Right-click for the last one" aria-label="Window layouts"></button>
+    <button id="logsBtn" class="ibtn" data-ico="file" data-tip="Open chat logs folder"></button>
+    <button id="cmdBtn" class="ibtn" data-ico="command" data-tip="Command panel (Ctrl+Shift+P)" aria-label="Command panel"></button>
+    <button id="shopBtn" class="ibtn" data-ico="heart" data-tip="Supporter perks"></button>
+    <button id="suggestBtn" class="ibtn" data-ico="bulb" data-tip="Suggest a feature"></button>
+    <button id="volBtn" class="ibtn" data-tip="YappyChat volume"></button>
+    <button id="hdrMore" class="ibtn" data-ico="more" data-tip="More" aria-label="More buttons"></button>
+    <button id="settingsBtn" class="ibtn" data-ico="gear" data-tip="Settings (Ctrl+,)"></button>
+    <button id="dashBtn" class="ibtn dashbtn" data-ico="pulse" data-tip="Streamer dashboard"></button>
+    <button id="me" class="me" data-tip="Account"></button>
+  </header>
+  <div id="statsbar" class="statsbar hidden"></div>
+  <div class="main">
+   <div class="mcol">
+    <div id="ws" class="ws">
+      <div id="dockSlot" class="dockslot hidden"><div class="dockgrip" data-tip="Drag to resize"></div></div>
+      <div class="cwrap"><main id="chats" class="chats">
+        <div id="empty" class="empty"><div id="emptyYappy"></div><h2>No channels yet</h2><p>Add a channel to start reading and moderating chat. Press Ctrl+K any time to jump between them.</p><button id="emptyAdd" class="btn primary">Add channel</button></div>
+      </main></div>
+    </div>
+  <footer class="composer"><div id="replybar" class="replybar hidden"></div>
+    <div class="inwrap">
+      <input id="input" placeholder=" " aria-label="Message" maxlength="500" autocomplete="off" disabled><span id="inph" class="inph">Enter message</span>
+      <button id="macroBtn" class="emotebtn mbtn" data-tip="Macros: saved messages (Ctrl+Shift+P for the command palette)" aria-label="Macros" data-ico="bolt"></button>
+      <button id="emoteBtn" class="emotebtn" data-tip="Emotes" aria-label="Emotes" data-ico="smile"></button>
+    </div>
+    <button id="send" class="btn primary">Chat</button>
+    <div id="yslot" class="yslot" aria-hidden="true"></div>
+  </footer>
+   </div>
+    <div id="sideGrip" class="sgrip hidden" data-tip="Drag to resize. Double-click to reset."></div>
+    <div id="sideWrap" class="sidewrap hidden"><div id="sdock" class="sdock hidden"></div>
+    <aside id="side" class="side hidden"></aside></div>
+  </div>
+</div>
+<div id="pip" class="pip hidden"></div>
+<div id="snapPrev" class="hidden"></div>
+<div id="ac" class="ac hidden"></div>
+<div id="pops"></div>
+<div id="modals"></div>
+<div id="toasts"></div>
+<script src="icons.js"></script>
+<script src="sounds.js"></script>
+<script src="holiday.js"></script>
+<script src="yappy.js"></script>
+<script src="perkdata.js"></script>
+<script src="safecss.js"></script>
+<script src="perks.js"></script>
+<script src="core.js"></script>
+<script src="chat.js"></script>
+<script src="media.js"></script>
+<script src="multistream.js"></script>
+<script src="layout.js"></script>
+<script src="extras.js"></script>
+<script src="panels.js"></script>
+<script src="tools.js"></script>
+<script src="commands.js"></script>
+<script src="more.js"></script>
+<script src="streamer.js"></script>
+<script src="secure.js"></script>
+<script src="shared.js"></script>
+<script src="previews.js"></script>
+<script src="brain.js"></script>
+<script src="modtools.js"></script>
+<script src="usability.js"></script>
+<script src="usage.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>

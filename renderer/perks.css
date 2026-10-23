@@ -1,0 +1,255 @@
+/* Perk visuals: titles, name effects, name plates, message backgrounds, entrances, badges. Shared by the app and the website (tools/sync-site.js copies this file). Linked BEFORE style.css so chat state styles (highlight, pinned...) win ties. */
+.pbadge{width:1.2em;height:1.2em;vertical-align:-.25em}.pb{margin-right:4px;display:inline-block}
+/* supporter perks: titles, name effects, name plates */
+.ttl{display:inline-block;font-size:.74em;font-weight:700;padding:0 7px;border-radius:9px;margin-right:5px;vertical-align:.08em;color:var(--tc);background:color-mix(in srgb,var(--tc) 15%,transparent);border:1px solid color-mix(in srgb,var(--tc) 45%,transparent)}
+.ttl.diamond{background:linear-gradient(110deg,rgba(110,231,255,.2),rgba(122,125,255,.25),rgba(110,231,255,.2));background-size:200% 100%;animation:shim 3.5s linear infinite;box-shadow:0 0 8px rgba(110,231,255,.45)}
+.nm{display:inline-block;position:relative}
+.nm.fx-glow .name{text-shadow:0 0 4px var(--fx,#ff5da2),0 0 10px var(--fx,#ff5da2),0 0 22px var(--fx,#ff5da2)}
+.nm.fx-pulse .name{animation:fxpulse 1.8s ease-in-out infinite}
+.nm.fx-shimmer .name{background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.95) 50%,transparent 65%),linear-gradient(90deg,#ff6b6b,#ffd93d,#6bff95,#5ad1ff,#c86bff,#ff6b6b);background-size:200% 100%;background-repeat:repeat-x;-webkit-background-clip:text;background-clip:text;color:transparent;animation:holo 3.2s linear infinite}
+.nm.fx-neon .name{color:#fff;text-shadow:0 0 3px #fff,0 0 8px var(--fx,#5ad1ff),0 0 16px var(--fx,#5ad1ff),0 0 28px var(--fx,#5ad1ff);animation:flicker 5s infinite}
+.nm.fx-aurora .name{background:linear-gradient(100deg,#2be8c4,#6a7bff,#ff5dc8,#2be8c4);background-size:200% 100%;background-repeat:repeat-x;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 5s linear infinite;filter:drop-shadow(0 0 4px rgba(106,123,255,.6))}
+.nm.fx-inferno .name{background:linear-gradient(0deg,#ff2d12,#ff8a1f 40%,#ffd23a 75%,#fff3a0);background-size:100% 220%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:flame .8s ease-in-out infinite alternate;filter:drop-shadow(0 0 5px rgba(255,100,20,.8))}
+@property --ang{syntax:"<angle>";initial-value:0deg;inherits:false}
+@keyframes spin{to{--ang:360deg}}
+@keyframes shim{to{background-position:200% 0}}
+@keyframes fxpulse{0%,100%{text-shadow:0 0 2px var(--fx,#ff5da2),0 0 6px var(--fx,#ff5da2);opacity:.85}50%{text-shadow:0 0 8px var(--fx,#ff5da2),0 0 20px var(--fx,#ff5da2),0 0 34px var(--fx,#ff5da2);opacity:1}}
+@keyframes flicker{0%,18%,22%,60%,64%,100%{opacity:1}20%,62%{opacity:.7}}
+@keyframes flame{from{background-position:0 0}to{background-position:0 100%}}
+.pbadge{width:1.2em;height:1.35em;vertical-align:-.28em;overflow:visible}
+.pshine{fill:rgba(255,255,255,.75);animation:pshine 3.6s ease-in-out infinite}
+.tier-silver .pshine{animation-delay:.5s}.tier-bronze .pshine{animation-delay:1s}.diamond .pshine{animation-duration:2.4s}
+@keyframes pshine{0%{transform:translateX(-260px)}55%,100%{transform:translateX(1700px)}}
+.tier-gold{filter:drop-shadow(0 0 3px rgba(255,196,40,.75))}.tier-silver{filter:drop-shadow(0 0 2px rgba(200,215,240,.55))}.tier-bronze{filter:drop-shadow(0 0 2px rgba(220,130,60,.5))}
+.pbadge.diamond{filter:drop-shadow(0 0 4px rgba(110,231,255,.9))}
+.tier .pbadge{width:34px;height:38px}
+/* Name effects (animated paints) */
+.nm.fx-holo .name,.nm.fx-chrome .name,.nm.fx-gold .name,.nm.fx-ocean .name,.nm.fx-plasma .name,.nm.fx-galaxy .name,.nm.fx-candy .name{-webkit-background-clip:text;background-clip:text;color:transparent;background-repeat:repeat-x}
+.nm.fx-holo .name{background-image:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.95) 50%,transparent 65%),linear-gradient(90deg,#ff8ad8,#8ad8ff,#8affc1,#fff08a,#d08aff,#ff8ad8);background-size:200% 100%;animation:holo 3.6s linear infinite}
+.nm.fx-chrome .name{background-image:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.95) 50%,transparent 60%),linear-gradient(180deg,#fff 0%,#aab6c8 42%,#3b4658 50%,#cfd9e8 68%,#fff 100%);background-size:200% 100%,100% 100%;animation:chrome 2.8s linear infinite;filter:drop-shadow(0 1px 0 rgba(0,0,0,.4))}
+.nm.fx-gold .name{background-image:linear-gradient(105deg,transparent 38%,rgba(255,255,255,.95) 50%,transparent 62%),linear-gradient(90deg,#9a6400,#ffe27a,#fff7c8,#ffc933,#9a6400);background-size:200% 100%;animation:holo 3s linear infinite;filter:drop-shadow(0 0 4px rgba(255,190,40,.65))}
+.nm.fx-ocean .name{background-image:linear-gradient(90deg,#0aa5b8,#3b7bff,#7ef0ff,#3b7bff,#0aa5b8);background-size:200% 100%;animation:shim 3.5s linear infinite;filter:drop-shadow(0 0 4px rgba(40,160,255,.6))}
+.nm.fx-plasma .name{background-image:linear-gradient(90deg,#ff2a6d,#ff9a1f,#8a2be2,#00d4ff,#ff2a6d);background-size:200% 100%;animation:shim 2.2s linear infinite,plasma 1.6s ease-in-out infinite alternate}
+.nm.fx-candy .name{background-image:linear-gradient(45deg,#ff5f9e 25%,#fff 25% 50%,#ff5f9e 50% 75%,#fff 75%);background-size:14px 14px;background-repeat:repeat;animation:candy .8s linear infinite;filter:drop-shadow(0 0 3px rgba(255,95,158,.6))}
+.nm.fx-galaxy .name{background-image:radial-gradient(1px 1px at 18% 30%,#fff,transparent),radial-gradient(1.3px 1.3px at 55% 70%,#fff,transparent),radial-gradient(1px 1px at 82% 28%,#fff,transparent),linear-gradient(100deg,#4b2bff,#c84bff,#2bb8ff,#4b2bff);background-size:100% 100%,100% 100%,100% 100%,200% 100%;animation:galaxy 6s linear infinite,twinkle 2s ease-in-out infinite alternate}
+.nm.fx-glitch .name{display:inline-block;color:#fff;animation:glitch 2.6s steps(1) infinite;text-shadow:2px 0 #ff2bd6,-2px 0 #00f0ff}
+@keyframes holo{from{background-position:0 0,0 0}to{background-position:-400% 0,-200% 0}}
+@keyframes chrome{from{background-position:0 0,0 0}to{background-position:-200% 0,0 0}}
+@keyframes candy{to{background-position:14px 0}}
+@keyframes plasma{from{filter:drop-shadow(0 0 2px #ff2a6d)}to{filter:drop-shadow(0 0 7px #00d4ff)}}
+@keyframes galaxy{to{background-position:0 0,0 0,0 0,-200% 0}}
+@keyframes twinkle{from{filter:brightness(.9)}to{filter:brightness(1.35) drop-shadow(0 0 4px rgba(150,90,255,.7))}}
+@keyframes glitch{0%,86%,100%{transform:none;text-shadow:2px 0 #ff2bd6,-2px 0 #00f0ff}88%{transform:translate(-2px,1px) skewX(-6deg);text-shadow:-3px 0 #ff2bd6,3px 0 #00f0ff}91%{transform:translate(2px,-1px);text-shadow:3px 1px #ff2bd6,-3px -1px #00f0ff}94%{transform:translate(-1px,0) skewX(4deg);text-shadow:-2px 0 #00f0ff,2px 0 #ff2bd6}97%{transform:none}}
+/* Entrances */
+:is(.msg,.yp-line)[class*="ent-"]{position:relative}
+:is(.msg,.yp-line).ent-pop{animation:entpop .8s cubic-bezier(.2,1.5,.4,1),entglow 1.8s ease-out}
+:is(.msg,.yp-line).ent-slide{animation:entslide .7s cubic-bezier(.1,.8,.2,1),entglow 1.8s ease-out}
+:is(.msg,.yp-line).ent-sparkle{animation:entspark 2s ease-out}
+:is(.msg,.yp-line).ent-sparkle:after{content:"";position:absolute;inset:-6px 0;pointer-events:none;background:radial-gradient(circle at 8% 40%,#fff 0 2px,transparent 3px),radial-gradient(circle at 22% 20%,#ffe27a 0 2px,transparent 3px),radial-gradient(circle at 40% 75%,#fff 0 1.5px,transparent 2.5px),radial-gradient(circle at 63% 25%,#ffe27a 0 2px,transparent 3px),radial-gradient(circle at 80% 70%,#fff 0 2px,transparent 3px),radial-gradient(circle at 93% 30%,#ffe27a 0 1.5px,transparent 2.5px);animation:entstars 1.6s ease-out forwards}
+:is(.msg,.yp-line).ent-spotlight{animation:entglow 2.2s ease-out;overflow:hidden}
+:is(.msg,.yp-line).ent-spotlight:before{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;pointer-events:none;background:linear-gradient(100deg,transparent,rgba(255,255,255,.38),transparent);animation:entbeam 1.5s ease-in-out forwards}
+:is(.msg,.yp-line).ent-confetti{animation:entpop .5s ease-out}
+:is(.msg,.yp-line).ent-confetti:after{content:"";position:absolute;left:30px;top:50%;width:90px;height:90px;margin:-45px 0 0 -45px;pointer-events:none;border-radius:50%;background:radial-gradient(circle at 20% 30%,#ff5d8f 0 3px,transparent 4px),radial-gradient(circle at 70% 20%,#5ad1ff 0 3px,transparent 4px),radial-gradient(circle at 85% 60%,#ffd93d 0 3px,transparent 4px),radial-gradient(circle at 40% 85%,#6bff95 0 3px,transparent 4px),radial-gradient(circle at 12% 70%,#c86bff 0 3px,transparent 4px),radial-gradient(circle at 55% 50%,#ff9a1f 0 3px,transparent 4px);animation:entconf 1.4s ease-out forwards}
+:is(.msg,.yp-line).ent-stamp{animation:entstamp .55s cubic-bezier(.3,0,.2,1),entglow 1.6s ease-out}
+@keyframes entpop{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.05);opacity:1}100%{transform:none}}
+@keyframes entslide{from{transform:translateX(-70px);opacity:0;filter:blur(3px)}}
+@keyframes entglow{0%{background:color-mix(in srgb,var(--accent) 38%,transparent);box-shadow:inset 3px 0 var(--accent)}100%{background:transparent;box-shadow:inset 3px 0 transparent}}
+@keyframes entspark{0%{background:rgba(255,236,150,.55);box-shadow:inset 0 0 34px rgba(255,236,150,.75)}100%{background:transparent;box-shadow:none}}
+@keyframes entstars{0%{opacity:0;transform:scale(.6)}25%{opacity:1}100%{opacity:0;transform:scale(1.15) translateY(-4px)}}
+@keyframes entbeam{from{transform:translateX(-100%)}to{transform:translateX(320%)}}
+@keyframes entconf{0%{opacity:1;transform:scale(.2) rotate(0)}100%{opacity:0;transform:scale(2.6) rotate(80deg)}}
+@keyframes entstamp{0%{transform:scale(2.4);opacity:0}55%{transform:scale(.96);opacity:1}70%{transform:translate(-2px,1px)}85%{transform:translate(2px,-1px)}100%{transform:none}}
+/* ===== Holiday entrances: layers over the message row (see Holiday.playEntrance) ===== */
+.yp-line{--entbg:var(--panel2)}
+.entfx{position:absolute;inset:0;pointer-events:none;z-index:4}
+.entfx i,.entfx b,.entfx u,.entfx em{position:absolute;display:block;font-style:normal;text-decoration:none}
+@media (prefers-reduced-motion:reduce){.entfx{display:none}}
+/* Christmas: snow falls over the message and the lines around it */
+:is(.msg,.yp-line).ent-s-christmas{animation:entfrost 2.6s ease-out}
+.entfx.s-christmas i{top:-26px;left:var(--x);width:var(--s);height:var(--s);border-radius:50%;background:#fff;box-shadow:0 0 5px #bfe0ff;opacity:0;animation:fxsnow var(--d) linear var(--l) forwards}
+@keyframes fxsnow{0%{opacity:0;transform:translate(0,0)}12%{opacity:.95}100%{opacity:0;transform:translate(var(--w),96px)}}
+@keyframes entfrost{0%,40%{background:rgba(190,225,255,.22);box-shadow:inset 0 0 18px rgba(190,225,255,.35)}100%{background:transparent;box-shadow:none}}
+/* Halloween: bats burst out of the message */
+:is(.msg,.yp-line).ent-s-halloween{animation:entspook 2.4s ease-out}
+.entfx.s-halloween b{left:26px;top:50%;width:36px;height:22px;margin:-11px 0 0 -18px;opacity:0;animation:fxbat 1.9s cubic-bezier(.2,.7,.3,1) var(--l) forwards}
+.entfx.s-halloween b i{inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 24'%3E%3Cpath d='M20 10C16 2 8 0 0 4c4 2 5 6 7 10 3-3 5-3 7 0 2-2 4-2 6 4 2-6 4-6 6-4 2-3 4-3 7 0 2-4 3-8 7-10-8-4-16-2-20 6z' fill='%235b2d91' stroke='%23ff9a3c' stroke-width='1.2'/%3E%3C/svg%3E") center/contain no-repeat;transform:scale(var(--z));animation:fxflap .17s ease-in-out infinite alternate}
+@keyframes fxbat{0%{opacity:0;transform:translate(0,0) scale(.4)}10%{opacity:1}80%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(1.1)}}
+@keyframes fxflap{from{transform:scale(var(--z),.35)}to{transform:scale(var(--z),1)}}
+@keyframes entspook{0%,35%{background:linear-gradient(90deg,rgba(123,63,191,.3),rgba(255,122,26,.16),transparent);box-shadow:inset 0 0 16px rgba(123,63,191,.4)}100%{background:transparent;box-shadow:none}}
+/* Thanksgiving and 4th of July: a sprite crosses the row and a curtain slides away behind it, uncovering the message */
+.entfx .cur{position:absolute;inset:0;background:var(--entbg,var(--bg));animation:fxcur var(--t) cubic-bezier(.45,.05,.55,.95) forwards}
+@keyframes fxcur{from{transform:translateX(0)}to{transform:translateX(102%)}}
+.entfx .run{position:absolute;top:50%;left:0;animation:fxrun var(--t) cubic-bezier(.45,.05,.55,.95) forwards}
+@keyframes fxrun{from{left:0}to{left:100%}}
+.entfx .run i{inset:0;background-position:center;background-size:contain;background-repeat:no-repeat}
+.entfx .turkey{width:46px;height:38px;margin:-24px 0 0 -30px}
+.entfx .turkey i{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 52'%3E%3Cg transform='translate(24 26)'%3E%3Cellipse rx='7' ry='20' fill='%23c2491d' transform='rotate(-60) translate(0 -18)'/%3E%3Cellipse rx='7' ry='20' fill='%23e08a2c' transform='rotate(-30) translate(0 -20)'/%3E%3Cellipse rx='7' ry='21' fill='%23d9a521' transform='translate(0 -21)'/%3E%3Cellipse rx='7' ry='20' fill='%23e08a2c' transform='rotate(30) translate(0 -20)'/%3E%3Cellipse rx='7' ry='20' fill='%23c2491d' transform='rotate(60) translate(0 -18)'/%3E%3C/g%3E%3Cellipse cx='30' cy='30' rx='15' ry='12' fill='%238c5a2b'/%3E%3Ccircle cx='47' cy='20' r='7' fill='%238c5a2b'/%3E%3Cpath d='M53 20l7 3-7 3z' fill='%23f5a524'/%3E%3Cpath d='M50 26c3 2 3 7 0 8-3-1-3-6 0-8z' fill='%23e23a3a'/%3E%3Ccircle cx='49' cy='18' r='1.8' fill='%23111'/%3E%3Cpath d='M26 40l-3 10M34 40l3 10' stroke='%23f5a524' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");animation:fxrunbob .16s ease-in-out infinite alternate}
+@keyframes fxrunbob{from{transform:translateY(-2px) rotate(-5deg)}to{transform:translateY(3px) rotate(5deg)}}
+.entfx.s-thanksgiving u{top:50%;left:var(--x);width:9px;height:14px;border-radius:60% 0 60% 0;background:#d9792b;opacity:0;animation:fxfeather 1.1s ease-in var(--l) forwards}
+@keyframes fxfeather{0%{opacity:0;transform:translateY(-6px) rotate(0)}20%{opacity:.9}100%{opacity:0;transform:translateY(26px) rotate(160deg)}}
+.entfx .jet{width:60px;height:25px;margin:-12px 0 0 -42px}
+.entfx .jet i{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 68 28'%3E%3Cpath d='M30 13L20 1h8l14 11zM30 15L20 27h8l14-11z' fill='%232d5be3'/%3E%3Cpath d='M8 13L3 4h9l5 8z' fill='%23d6283b'/%3E%3Cpath d='M3 14C3 11 8 10 22 9h22c12 0 20 3 24 5-4 2-12 5-24 5H22C8 19 3 17 3 14z' fill='%23eef2fb'/%3E%3Cpath d='M46 11c6-1 11 0 14 3-5 1-10 1-14 0z' fill='%2378aaff'/%3E%3Cpath d='M12 14h26' stroke='%23d6283b' stroke-width='2'/%3E%3C/svg%3E")}
+.entfx .trail{position:absolute;left:0;top:50%;width:190px;height:11px;margin:-5px 0 0 -232px;background:linear-gradient(#ff3b4f 0 33.3%,#fff 33.3% 66.6%,#3b6bff 66.6%);border-radius:6px 0 0 6px;opacity:.9;-webkit-mask:linear-gradient(90deg,transparent,#000 70%);mask:linear-gradient(90deg,transparent,#000 70%);animation:fxrun var(--t) cubic-bezier(.45,.05,.55,.95) forwards}
+/* Easter: eggs are launched out of the message */
+.entfx.s-easter b{left:22px;top:50%;width:14px;height:18px;margin:-9px 0 0 -7px;opacity:0;animation:fxeggx 1.5s linear var(--l) forwards}
+.entfx.s-easter b i{inset:0;border-radius:50% 50% 50% 50%/62% 62% 38% 38%;background:linear-gradient(transparent 38%,rgba(255,255,255,.75) 38% 52%,transparent 52% 66%,rgba(255,255,255,.55) 66% 76%,transparent 76%),var(--c);box-shadow:0 1px 3px rgba(0,0,0,.25);animation:fxeggy 1.5s var(--l) forwards}
+@keyframes fxeggx{0%{opacity:0;transform:translateX(0)}6%{opacity:1}88%{opacity:1}100%{opacity:0;transform:translateX(var(--dx))}}
+@keyframes fxeggy{0%{transform:translateY(0) rotate(0);animation-timing-function:cubic-bezier(.2,.7,.4,1)}38%{transform:translateY(calc(var(--h)*-1)) rotate(calc(var(--r)*.5));animation-timing-function:cubic-bezier(.6,0,.9,.6)}100%{transform:translateY(48px) rotate(var(--r))}}
+:is(.msg,.yp-line).ent-s-easter{animation:entegg 2.2s ease-out}
+@keyframes entegg{0%,30%{background:linear-gradient(90deg,rgba(255,158,201,.22),rgba(184,161,255,.18),rgba(143,227,181,.18),transparent)}100%{background:transparent}}
+/* Valentine's Day: hearts fly out with a soft pink glow */
+:is(.msg,.yp-line).ent-s-valentines{animation:entpink 2.6s ease-out}
+.entfx.s-valentines i{left:var(--x);top:50%;width:20px;height:20px;margin:-10px 0 0 -10px;background:var(--c);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-70 -70 140 140'%3E%3Cpath d='M0 38C-62 -8 -52 -58 -22 -58C-8 -58 0 -46 0 -38C0 -46 8 -58 22 -58C52 -58 62 -8 0 38Z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-70 -70 140 140'%3E%3Cpath d='M0 38C-62 -8 -52 -58 -22 -58C-8 -58 0 -46 0 -38C0 -46 8 -58 22 -58C52 -58 62 -8 0 38Z'/%3E%3C/svg%3E") center/contain no-repeat;opacity:0;animation:fxheart 2s ease-out var(--l) forwards}
+@keyframes fxheart{0%{opacity:0;transform:translate(0,0) scale(.3)}15%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(var(--z))}}
+@keyframes entpink{0%{background:rgba(255,120,170,.3);box-shadow:inset 0 0 26px rgba(255,105,160,.55),0 0 18px rgba(255,105,160,.35)}60%{background:rgba(255,120,170,.16)}100%{background:transparent;box-shadow:none}}
+/* New Year: fireworks */
+:is(.msg,.yp-line).ent-s-newyear{animation:entgold 2.4s ease-out}
+.entfx.s-newyear em{left:var(--x);top:var(--y);width:0;height:0}
+.entfx.s-newyear em i{left:0;top:0;width:6px;height:6px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c),0 0 3px #fff;opacity:0;animation:fxspark 1.1s ease-out var(--l) forwards}
+@keyframes fxspark{0%{opacity:1;transform:rotate(var(--a)) translateX(0)}100%{opacity:0;transform:rotate(var(--a)) translateX(var(--r))}}
+@keyframes entgold{0%,35%{background:linear-gradient(90deg,rgba(245,197,66,.25),rgba(255,93,143,.12),transparent)}100%{background:transparent}}
+
+/* ===== Name plates: a backdrop behind the name. Each is its own scene. ===== */
+.nm[class*=" pl-"]{padding:0 9px;border-radius:7px;position:relative;isolation:isolate;margin:0 1px}
+.nm[class*=" pl-"]>.name{position:relative}
+.nm[class*=" pl-"]::before,.nm[class*=" pl-"]::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1}
+.nm[class*=" pl-"]::after{display:none}
+.nm.pl-dk{--lmin:78%;--lmax:100%}.nm.pl-lt{--lmin:0%;--lmax:26%}
+/* Blueprint */
+.nm.pl-solid{--lmin:80%;--lmax:100%;background:#14509b;border-radius:3px;box-shadow:inset 0 0 0 1.5px #fff,0 0 0 1px rgba(20,80,155,.5)}
+.nm.pl-solid::before{background:linear-gradient(rgba(255,255,255,.2) 1px,transparent 1px) 0 0/8px 8px,linear-gradient(90deg,rgba(255,255,255,.2) 1px,transparent 1px) 0 0/8px 8px;animation:plgrid 6s linear infinite}
+@keyframes plgrid{to{background-position:8px 8px,8px 8px}}
+/* Caution tape */
+.nm.pl-dash{--lmin:82%;--lmax:100%;background:#1b1b1b;border-radius:2px}
+.nm.pl-dash::before{background:repeating-linear-gradient(135deg,#ffc400 0 5px,#161616 5px 10px) 0 0/20px 3px repeat-x;bottom:auto;height:3px;animation:platape .9s linear infinite}
+.nm.pl-dash::after{display:block;background:repeating-linear-gradient(135deg,#ffc400 0 5px,#161616 5px 10px) 0 0/20px 3px repeat-x;top:auto;height:3px;animation:platape .9s linear infinite reverse}
+@keyframes platape{to{background-position-x:20px}}
+/* Prism ring */
+.nm.pl-rainbow{border-radius:9px;border:1.5px solid transparent;background:linear-gradient(var(--bg),var(--bg)) padding-box,conic-gradient(from var(--ang,0deg),#ff5d5d,#ffd93d,#6bff95,#5ad1ff,#c86bff,#ff5d5d) border-box;animation:spin 3s linear infinite;padding:0 8px}
+/* Neon sign */
+.nm.pl-neon{--lmin:80%;--lmax:100%;background:#12061b;border-radius:9px;box-shadow:0 0 0 1.5px #ff6ae6,0 0 0 4px #12061b,0 0 0 5px rgba(255,106,230,.6),0 0 14px 2px rgba(255,106,230,.55),inset 0 0 10px rgba(255,106,230,.35);animation:plneon 4.5s infinite}
+@keyframes plneon{0%,17%,21%,58%,62%,100%{opacity:1}19%,60%{opacity:.62}}
+/* Moonrise */
+.nm.pl-moonrise{--lmin:80%;--lmax:100%;padding-right:19px;background:linear-gradient(90deg,#0a0e2c,#1c2a63)}
+.nm.pl-moonrise::before{background:radial-gradient(circle at 93% 50%,#fff6d6 0 4px,rgba(255,246,214,.32) 5px,transparent 13px),radial-gradient(1px 1px at 14% 30%,#fff,transparent),radial-gradient(1px 1px at 38% 72%,#fff,transparent),radial-gradient(1.2px 1.2px at 62% 28%,#fff,transparent),radial-gradient(1px 1px at 78% 66%,#fff,transparent);animation:pltw 3s ease-in-out infinite alternate}
+@keyframes pltw{from{opacity:.65}to{opacity:1}}
+/* Sunset strip */
+.nm.pl-sunset{--lmin:84%;--lmax:100%;background:linear-gradient(90deg,#2d1560,#b83a7e 55%,#ff9a3c);background-size:140% 100%;animation:plslide 9s ease-in-out infinite alternate}
+.nm.pl-sunset::before{background:radial-gradient(circle at 92% 100%,#ffe27a 0 6px,rgba(255,226,122,.35) 7px,transparent 16px)}
+@keyframes plslide{to{background-position:100% 0}}
+/* Deep sea */
+.nm.pl-deepsea{--lmin:82%;--lmax:100%;background:linear-gradient(180deg,#06506b,#031f33)}
+.nm.pl-deepsea::before{background:radial-gradient(circle,rgba(190,240,255,.8) 0 1.5px,transparent 2.5px) 0 0/22px 16px,radial-gradient(circle,rgba(190,240,255,.6) 0 1px,transparent 2px) 9px 6px/17px 13px;animation:plbub 3s linear infinite}
+@keyframes plbub{to{background-position:0 -16px,9px -13px}}
+/* Circuit board */
+.nm.pl-circuit{--lmin:82%;--lmax:100%;background:#062a1a;border-radius:4px}
+.nm.pl-circuit::before{background:linear-gradient(90deg,rgba(31,174,106,.5) 1px,transparent 1px) 0 0/12px 100%,linear-gradient(rgba(31,174,106,.5) 1px,transparent 1px) 0 6px/100% 12px,radial-gradient(circle,#1fae6a 0 1.5px,transparent 2px) 6px 6px/12px 12px}
+.nm.pl-circuit::after{display:block;background:linear-gradient(90deg,transparent,#b6ffd5,transparent) -40% 50%/40% 2px no-repeat;animation:plrun 2.2s ease-in-out infinite}
+@keyframes plrun{to{background-position:140% 50%}}
+/* Synthwave */
+.nm.pl-synthwave{--lmin:84%;--lmax:100%;background:linear-gradient(180deg,#1b0538 55%,#3a0d6e 56%);border-radius:3px}
+.nm.pl-synthwave::before{background:linear-gradient(90deg,rgba(255,62,165,.7) 1px,transparent 1px) 0 0/10px 100%,linear-gradient(transparent 48%,#ff3ea5 49% 52%,transparent 53%);-webkit-mask:linear-gradient(transparent 50%,#000 51%);mask:linear-gradient(transparent 50%,#000 51%);animation:plgrid2 1.6s linear infinite}
+@keyframes plgrid2{to{background-position:10px 0,0 0}}
+/* Cherry blossom */
+.nm.pl-blossom{--lmin:84%;--lmax:100%;background:linear-gradient(90deg,#3d1030,#6b1f4e)}
+.nm.pl-blossom::before{background:radial-gradient(ellipse 3px 2px,#ffb7d0 0,#ffb7d0 60%,transparent 70%) 0 0/26px 20px,radial-gradient(ellipse 2.5px 1.8px,#ff8fb8 0,#ff8fb8 60%,transparent 70%) 11px 9px/31px 23px;animation:plpet 5s linear infinite}
+@keyframes plpet{to{background-position:-26px 20px,-20px 23px}}
+/* Lava flow */
+.nm.pl-lava{--lmin:86%;--lmax:100%;background:linear-gradient(100deg,#2a0500,#9a2200,#ff6a00,#9a2200,#2a0500);background-size:300% 100%;animation:pllava 9s linear infinite;box-shadow:inset 0 0 8px rgba(0,0,0,.6)}
+@keyframes pllava{to{background-position:-300% 0}}
+/* Digital rain */
+.nm.pl-matrix{--lmin:84%;--lmax:100%;background:#021008;border-radius:2px}
+.nm.pl-matrix::before{background:linear-gradient(180deg,rgba(61,255,122,.0),rgba(61,255,122,.75)) 0 0/6px 14px;-webkit-mask:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 6px);mask:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 6px);animation:plrain 1.1s linear infinite}
+@keyframes plrain{to{background-position:0 14px}}
+/* Gilded frame */
+.nm.pl-gilded{--lmin:84%;--lmax:100%;background:#241703;border-radius:4px;box-shadow:inset 0 0 0 1.5px #e8b923,inset 0 0 0 3px #241703,inset 0 0 0 4px #8a6410}
+.nm.pl-gilded::before{background:linear-gradient(105deg,transparent 40%,rgba(255,236,160,.55) 50%,transparent 60%) -100% 0/60% 100% no-repeat;animation:plshine 4.5s ease-in-out infinite}
+@keyframes plshine{0%{background-position:-100% 0}45%,100%{background-position:230% 0}}
+/* Comic book */
+.nm.pl-comic{--lmin:0%;--lmax:20%;background:#fff3a8;border-radius:5px;border:2px solid #111;padding:0 8px;box-shadow:3px 3px 0 #111}
+.nm.pl-comic::before{background:radial-gradient(circle,rgba(255,60,120,.45) 0 1.3px,transparent 1.8px) 0 0/6px 6px;-webkit-mask:linear-gradient(90deg,transparent 30%,#000);mask:linear-gradient(90deg,transparent 30%,#000)}
+/* Frostbite */
+.nm.pl-frost{--lmin:0%;--lmax:24%;background:linear-gradient(180deg,#e4f4ff,#8fc8f2);box-shadow:inset 0 0 0 1px #fff,0 0 8px rgba(143,200,242,.6)}
+.nm.pl-frost::before{background:radial-gradient(circle at 15% 30%,#fff 0 1.2px,transparent 2.5px),radial-gradient(circle at 55% 75%,#fff 0 1.5px,transparent 3px),radial-gradient(circle at 85% 25%,#fff 0 1.2px,transparent 2.5px);animation:pltw 1.6s ease-in-out infinite alternate}
+/* Frosted glass */
+.nm.pl-glass{background:rgba(255,255,255,.1);-webkit-backdrop-filter:blur(6px) saturate(1.4);backdrop-filter:blur(6px) saturate(1.4);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),inset 0 1px 0 rgba(255,255,255,.5);border-radius:10px}
+.nm.pl-glass::before{background:linear-gradient(115deg,rgba(255,255,255,.35),transparent 40%)}
+/* Firefly glade */
+.nm.pl-glade{--lmin:82%;--lmax:100%;background:linear-gradient(90deg,#0d2612,#1d4a2a)}
+.nm.pl-glade::before{background:radial-gradient(circle,#fff6a0 0 1.5px,rgba(255,246,160,.35) 2.5px,transparent 5px) 0 0/34px 22px;animation:plfly 2.4s ease-in-out infinite alternate}
+.nm.pl-glade::after{display:block;background:radial-gradient(circle,#d8ff9a 0 1.5px,rgba(216,255,154,.35) 2.5px,transparent 5px) 17px 11px/41px 26px;animation:plfly 3.1s ease-in-out infinite alternate-reverse}
+@keyframes plfly{from{opacity:.1;transform:translateY(2px)}to{opacity:1;transform:translateY(-2px)}}
+/* Pixel quest */
+.nm.pl-pixel{--lmin:84%;--lmax:100%;background:#1f1f48;border-radius:0;margin:0 4px;box-shadow:0 -3px 0 0 #7a7aff,0 3px 0 0 #7a7aff,-3px 0 0 0 #7a7aff,3px 0 0 0 #7a7aff,inset 0 -3px 0 rgba(0,0,0,.35)}
+.nm.pl-pixel::before{background:linear-gradient(90deg,#fff 0 2px,transparent 2px) 3px 3px/4px 2px no-repeat,#0000;animation:plpix 1.2s steps(4) infinite}
+@keyframes plpix{to{background-position:calc(100% - 5px) 3px}}
+/* ===== Holiday plates (pl-sp-<holiday>) ===== */
+.nm.pl-sp-christmas{--lmin:84%;--lmax:100%;background:linear-gradient(180deg,#0f4a2a,#0a2c19);box-shadow:inset 0 -2px 0 #c0392b}
+.nm.pl-sp-christmas::before{background:radial-gradient(circle,#ff4d55 0 2px,transparent 3px) 2px 0/16px 6px repeat-x,radial-gradient(circle,#ffd86b 0 2px,transparent 3px) 10px 2px/16px 6px repeat-x,radial-gradient(circle,#fff 0 1px,transparent 2px) 0 0/14px 12px;animation:plsnow 2.6s linear infinite}
+@keyframes plsnow{to{background-position:2px 0,10px 2px,0 12px}}
+.nm.pl-sp-newyear{--lmin:84%;--lmax:100%;background:linear-gradient(90deg,#0a0d2a,#1b1950)}
+.nm.pl-sp-newyear::before{background:linear-gradient(135deg,#f5c542 0 2px,transparent 2px) 0 0/15px 13px,linear-gradient(45deg,#ff5d8f 0 2px,transparent 2px) 6px 5px/19px 17px,linear-gradient(90deg,#5ad1ff 0 2px,transparent 2px) 3px 9px/23px 11px;animation:plconf 3s linear infinite}
+@keyframes plconf{to{background-position:0 13px,6px 22px,3px 20px}}
+.nm.pl-sp-halloween{--lmin:82%;--lmax:100%;background:linear-gradient(90deg,#1c0b30,#2b1247)}
+.nm.pl-sp-halloween::before{background:radial-gradient(circle at 9% 50%,#ff9a3c 0 3px,#ff7a1a 4px 5px,transparent 8px),radial-gradient(ellipse 30% 70% at 50% 100%,rgba(182,255,77,.28),transparent),radial-gradient(ellipse 30% 70% at 85% 100%,rgba(155,93,229,.35),transparent);animation:pltw 2.2s ease-in-out infinite alternate}
+.nm.pl-sp-thanksgiving{--lmin:84%;--lmax:100%;background:repeating-linear-gradient(180deg,#5a3216 0 4px,#4a2810 4px 5px)}
+.nm.pl-sp-thanksgiving::before{background:radial-gradient(ellipse 4px 2.5px,#e08a2c,#e08a2c 60%,transparent 70%) 0 0/24px 18px,radial-gradient(ellipse 3.5px 2.2px,#c2491d,#c2491d 60%,transparent 70%) 12px 9px/29px 21px;animation:plpet 5s linear infinite}
+.nm.pl-sp-easter{--lmin:0%;--lmax:26%;background:linear-gradient(90deg,#ffd9ec,#e4dcff 55%,#cdf5de)}
+.nm.pl-sp-easter::before{background:radial-gradient(ellipse 3px 4px,#ff9ec9 0,#ff9ec9 60%,transparent 70%) 3px 80%/24px 100% no-repeat,radial-gradient(ellipse 3px 4px,#8fe3b5 0,#8fe3b5 60%,transparent 70%) 13px 85%/24px 100% no-repeat;animation:plhop 1.6s ease-in-out infinite alternate}
+@keyframes plhop{from{transform:translateY(0)}to{transform:translateY(-2px)}}
+.nm.pl-sp-july4{--lmin:86%;--lmax:100%;background:#11255c}
+.nm.pl-sp-july4::before{background:radial-gradient(circle,#fff 0 1px,transparent 1.8px) 3px 3px/9px 9px,repeating-linear-gradient(180deg,rgba(255,70,90,.3) 0 3px,transparent 3px 6px);-webkit-mask:linear-gradient(90deg,#000 22%,rgba(0,0,0,.0) 23%,#000 23.5%);mask:none;animation:pltw 1.8s ease-in-out infinite alternate}
+.nm.pl-sp-valentines{--lmin:88%;--lmax:100%;background:linear-gradient(90deg,#7a0e2e,#d6336c)}
+.nm.pl-sp-valentines::before{background:#ffc2d8;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 15C-1 9 1 3 5 3c1 0 2 1 2 2 0-1 1-2 2-2 4 0 6 6-3 12z'/%3E%3C/svg%3E") 0 0/26px 20px;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 20'%3E%3Cpath d='M6 15C-1 9 1 3 5 3c1 0 2 1 2 2 0-1 1-2 2-2 4 0 6 6-3 12z'/%3E%3C/svg%3E") 0 0/26px 20px;opacity:.35;animation:plheart 3s linear infinite}
+@keyframes plheart{to{-webkit-mask-position:0 -20px;mask-position:0 -20px}}
+/* ===== Holiday name effects (fx-sx-<holiday>): seven different looks ===== */
+.nm[class*="fx-sx-"] .name{-webkit-background-clip:text;background-clip:text;color:transparent;background-repeat:repeat-x}
+.nm.fx-sx-christmas .name{background-image:linear-gradient(90deg,#ff4d55 0 25%,#fff 25% 50%,#3ccf7a 50% 75%,#fff 75%);background-size:100% 100%;animation:xmas 1.4s steps(1) infinite;filter:drop-shadow(0 0 3px rgba(255,255,255,.55))}
+@keyframes xmas{0%{background-position:0 0}25%{background-position:25% 0;filter:drop-shadow(0 0 5px #ff4d55)}50%{background-position:50% 0}75%{background-position:75% 0;filter:drop-shadow(0 0 5px #3ccf7a)}}
+.nm.fx-sx-newyear .name{background-image:radial-gradient(circle,#fff 0 1px,transparent 1.6px),radial-gradient(circle,#ff5d8f 0 1px,transparent 1.6px),linear-gradient(180deg,#fff2a8,#f5c542 55%,#b8860b);background-size:9px 11px,13px 9px,100% 100%;animation:nyconf 2s linear infinite;filter:drop-shadow(0 0 4px rgba(245,197,66,.7))}
+@keyframes nyconf{to{background-position:0 11px,0 9px,0 0}}
+.nm.fx-sx-halloween .name{color:#ff9a3c;-webkit-text-fill-color:#ff9a3c;background:none;text-shadow:0 0 4px #9b5de5,0 0 12px #9b5de5,0 0 20px #b6ff4d;animation:flicker 3.5s infinite,xbob 2.6s ease-in-out infinite;display:inline-block}
+@keyframes xbob{50%{transform:translateY(-1.5px)}}
+.nm.fx-sx-thanksgiving .name{background-image:linear-gradient(90deg,#c2491d,#e08a2c,#d9a521,#8c5a2b,#c2491d);background-size:200% 100%;animation:shim 7s linear infinite;filter:drop-shadow(0 1px 0 rgba(60,20,0,.5))}
+.nm.fx-sx-easter .name{background-image:linear-gradient(90deg,#ff9ec9,#b8a1ff,#8fe3b5,#ffe38a,#ff9ec9);background-size:200% 100%;animation:shim 4s linear infinite,xhop 1.8s ease-in-out infinite;display:inline-block}
+@keyframes xhop{0%,60%,100%{transform:none}70%{transform:translateY(-3px)}80%{transform:translateY(0)}88%{transform:translateY(-1.5px)}}
+.nm.fx-sx-july4 .name{background-image:repeating-linear-gradient(90deg,#ff4d5e 0 .45em,#fff .45em .9em,#4f8cff .9em 1.35em);background-size:2.7em 100%;animation:xflag 3s linear infinite;filter:drop-shadow(0 0 4px rgba(79,140,255,.6))}
+@keyframes xflag{to{background-position:2.7em 0}}
+.nm.fx-sx-valentines .name{background-image:linear-gradient(90deg,#ff2e63,#ff8fb8,#ff2e63);background-size:200% 100%;animation:shim 3s linear infinite,xbeat 1.3s ease-in-out infinite;display:inline-block;filter:drop-shadow(0 0 5px rgba(255,46,99,.7))}
+@keyframes xbeat{0%,40%,100%{transform:none}10%{transform:scale(1.08)}20%{transform:scale(1)}30%{transform:scale(1.05)}}
+/* ===== Titles ===== */
+.ttl.shine{position:relative;overflow:hidden;background-image:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.55) 50%,transparent 65%);background-size:250% 100%;background-repeat:no-repeat;background-position:-150% 0;background-color:color-mix(in srgb,var(--tc) 15%,transparent);animation:ttlshine 3.8s ease-in-out infinite}
+@keyframes ttlshine{0%{background-position:-150% 0}55%,100%{background-position:250% 0}}
+.ttl.dashed{border-style:dashed}
+/* ===== Message backgrounds (a soft tint behind your messages; Settings > Chat can turn them off) ===== */
+:where(body:not(.mbg-off)) :is(.msg,.yp-line)[class*=" mbg-"]{background-image:linear-gradient(90deg,color-mix(in srgb,var(--m1) 17%,transparent),color-mix(in srgb,var(--m2) 9%,transparent) 55%,transparent 92%)}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-anim{background-size:260% 100%;animation:mbgdrift 24s ease-in-out infinite alternate}
+@keyframes mbgdrift{to{background-position:100% 0}}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-aurora{background-image:linear-gradient(90deg,color-mix(in srgb,#2be8c4 16%,transparent),color-mix(in srgb,#8a6bff 14%,transparent),color-mix(in srgb,#ff6bc8 11%,transparent),color-mix(in srgb,#2be8c4 16%,transparent))}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-embers{background-image:radial-gradient(ellipse 28% 120% at 10% 50%,color-mix(in srgb,#ff8a3d 18%,transparent),transparent),radial-gradient(ellipse 22% 120% at 60% 50%,color-mix(in srgb,#ff4d4d 11%,transparent),transparent);background-size:200% 100%}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-starlight{background-image:radial-gradient(1px 1px at 12% 30%,rgba(255,255,255,.55),transparent),radial-gradient(1px 1px at 41% 70%,rgba(255,255,255,.45),transparent),radial-gradient(1.2px 1.2px at 73% 35%,rgba(255,255,255,.5),transparent),linear-gradient(90deg,color-mix(in srgb,#5b7bff 16%,transparent),color-mix(in srgb,#a99bff 8%,transparent) 60%,transparent);background-size:50% 100%,50% 100%,50% 100%,100% 100%;animation:mbgstar 60s linear infinite}
+@keyframes mbgstar{to{background-position:-100% 0,-100% 0,-100% 0,0 0}}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-silk{background-image:linear-gradient(100deg,transparent 42%,rgba(255,255,255,.12) 50%,transparent 58%),linear-gradient(90deg,color-mix(in srgb,#c8d4ea 12%,transparent),transparent 80%);background-size:300% 100%,100% 100%;background-repeat:no-repeat;animation:mbgsilk 14s ease-in-out infinite}
+@keyframes mbgsilk{0%{background-position:-60% 0,0 0}55%,100%{background-position:160% 0,0 0}}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-tidal{background-image:linear-gradient(90deg,color-mix(in srgb,#2a8bff 14%,transparent),color-mix(in srgb,#2de0c8 11%,transparent),color-mix(in srgb,#2a8bff 14%,transparent));background-size:220% 100%;animation:mbgtide 16s linear infinite}
+@keyframes mbgtide{to{background-position:-220% 0}}
+:where(body:not(.mbg-off)) :is(.msg,.yp-line).mbg-cotton{background-image:radial-gradient(ellipse 35% 140% at 15% 50%,color-mix(in srgb,#ff8fc4 16%,transparent),transparent),radial-gradient(ellipse 35% 140% at 70% 50%,color-mix(in srgb,#7fc4ff 14%,transparent),transparent);background-size:200% 100%}
+@media (prefers-reduced-motion:reduce){.nm[class*=" pl-"],.nm[class*=" pl-"]::before,.nm[class*=" pl-"]::after,.nm .name,.ttl,.msg[class*=" mbg-"]{animation:none!important}}
+body.streamcalm .nm[class*=" pl-"]::before,body.streamcalm .nm[class*=" pl-"]::after,body.streamcalm .msg[class*=" mbg-"]{animation-play-state:paused}
+.list>.msg.old[class*="mbg-"]{animation:none!important}
+/* per-message-background colours (generated from perkdata.js) */
+:is(.msg,.yp-line).mbg-dusk{--m1:#a064ff;--m2:#ff70aa}
+:is(.msg,.yp-line).mbg-mint{--m1:#2ee6a6;--m2:#2bb8d6}
+:is(.msg,.yp-line).mbg-ember{--m1:#ff8a3d;--m2:#ff4d4d}
+:is(.msg,.yp-line).mbg-tide{--m1:#3b7bff;--m2:#35d0e6}
+:is(.msg,.yp-line).mbg-rosewater{--m1:#ff7aa8;--m2:#ffc2d6}
+:is(.msg,.yp-line).mbg-citrus{--m1:#ffd23a;--m2:#9be04a}
+:is(.msg,.yp-line).mbg-orchid{--m1:#e04cc8;--m2:#8a5cff}
+:is(.msg,.yp-line).mbg-slate{--m1:#7c8aa5;--m2:#3ba7a0}
+:is(.msg,.yp-line).mbg-aurora{--m1:#2be8c4;--m2:#8a6bff}
+:is(.msg,.yp-line).mbg-embers{--m1:#ff8a3d;--m2:#ff4d4d}
+:is(.msg,.yp-line).mbg-starlight{--m1:#5b7bff;--m2:#a99bff}
+:is(.msg,.yp-line).mbg-silk{--m1:#c8d4ea;--m2:#7f93b8}
+:is(.msg,.yp-line).mbg-tidal{--m1:#2a8bff;--m2:#2de0c8}
+:is(.msg,.yp-line).mbg-cotton{--m1:#ff8fc4;--m2:#7fc4ff}
+body.mbg-still :is(.msg,.yp-line)[class*=" mbg-"]{animation:none!important}

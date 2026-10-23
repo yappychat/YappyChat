@@ -1,0 +1,48 @@
+const { contextBridge, ipcRenderer } = require('electron');
+// Chat log lines are collected and sent together every couple of seconds instead of one message each
+const logBuf = new Map(); let logT = 0;
+function flushLog() { logT = 0; if (!logBuf.size) return; const batch = [...logBuf].map(([channel, lines]) => ({ channel, lines })); logBuf.clear(); ipcRenderer.send('log:batch', batch); }
+window.addEventListener('beforeunload', flushLog);
+contextBridge.exposeInMainWorld('cg', {
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (p) => ipcRenderer.invoke('settings:set', p),
+  getToken: () => ipcRenderer.invoke('token:get'),
+  setToken: (t) => ipcRenderer.invoke('token:set', t),
+  authMode: () => ipcRenderer.invoke('auth:mode'),
+  deviceLogin: (scopes) => ipcRenderer.invoke('auth:device', scopes),
+  cancelLogin: () => ipcRenderer.invoke('auth:cancel'),
+  onAuthCode: (cb) => ipcRenderer.on('auth:code', (e, d) => cb(d)),
+  refreshToken: () => ipcRenderer.invoke('token:refresh'),
+  reportError: (o) => ipcRenderer.send('diag:error', { message: String((o && o.message) || o || '').slice(0, 1000), stack: String((o && o.stack) || '').slice(0, 3000) }),
+  openDiagnostics: () => ipcRenderer.invoke('diag:open'),
+  playerBase: () => ipcRenderer.invoke('player:base'),
+  playerStatus: () => ipcRenderer.invoke('player:status'),
+  playerSignIn: () => ipcRenderer.invoke('player:signin'),
+  playerSignOut: () => ipcRenderer.invoke('player:signout'),
+  version: () => ipcRenderer.invoke('app:version'),
+  videoInfo: () => ipcRenderer.invoke('app:video'),
+  startFresh: () => ipcRenderer.invoke('app:fresh'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdate: (cb) => ipcRenderer.on('update', (e, d) => cb(d)),
+  http: (o) => ipcRenderer.invoke('http', o),
+  log: (channel, line) => { let l = logBuf.get(channel); if (!l) logBuf.set(channel, (l = [])); l.push(line); if (!logT) logT = setTimeout(flushLog, 2000); },
+  searchLogs: (q) => ipcRenderer.invoke('logs:search', q),
+  userLogs: (channel, names) => ipcRenderer.invoke('logs:user', channel, names),
+  openLogs: () => ipcRenderer.invoke('logs:open'),
+  keepAlive: (on) => ipcRenderer.send('power:stream', !!on),
+  openExternal: (u) => ipcRenderer.invoke('open:external', u),
+  pickSound: () => ipcRenderer.invoke('sound:pick'),
+  exportSettings: () => ipcRenderer.invoke('settings:export'),
+  saveReport: (o) => ipcRenderer.invoke('report:save', o),
+  importSettings: () => ipcRenderer.invoke('settings:import'),
+  titleBar: (o) => ipcRenderer.send('titlebar:set', o),
+  onLockEvent: (cb) => ipcRenderer.on('sys:lock', (e, why) => cb(why)),
+  onFocus: (cb) => ipcRenderer.on('win:focus', (e, on) => cb(!!on)),
+  startupGet: () => ipcRenderer.invoke('startup:get'),
+  startupSet: (o) => ipcRenderer.invoke('startup:set', o),
+  hideFromCapture: (on) => ipcRenderer.send('capture:hide', !!on),
+  alertFlash: () => ipcRenderer.send('alert:flash'),
+  alertStop: () => ipcRenderer.send('alert:stop'),
+  flash: (why) => ipcRenderer.send('notify:flash', { why })
+});
