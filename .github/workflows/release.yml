@@ -1,0 +1,23 @@
+# Builds the Windows installer and publishes it as a GitHub Release when a version tag is pushed.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write   # lets the job create the release and upload the installer
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true   # shows known vulnerabilities in the log without blocking the build
+      - name: Build and publish the installer
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
