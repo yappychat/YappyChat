@@ -1,0 +1,9 @@
+{
+  "_help": "Host this file in your GitHub repo (main branch). One entry per supporter. 'total' is dollars tipped and decides the badge tier (10 white, 25 bronze, 50 silver, 100+ gold). 'owned' lists what they bought, 'loadout' what they have equipped, 'gifts' how many gifts they have given (earns the Gifter title). Use tools/grant.js to edit it. Example entry: {\"login\": \"name\", \"total\": 30, \"owned\": {\"effects\": [\"glow\"]}, \"loadout\": {\"effect\": \"glow\"}}.",
+  "users": [
+    {
+      "login": "vonarc",
+      "role": "creator"
+    }
+  ]
+}

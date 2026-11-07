@@ -1,0 +1,46 @@
+// Release notes: the one place they're written. The app's "What's new", the website's changelog,
+// its "New in" boxes and the download page all read this file (tools/sync-site.js copies it to the site).
+// Add the newest version at the top: { v, date (YYYY-MM-DD, or "" if unknown), pin (optional one line for the website's pinned strip), fixes (true for a bug-fix release:
+// headed "Fixes in" instead of "What's new in"), items: [[title, text], ...] } with up to 10 items (a fixes release can list more).
+(function (root) {
+const RELEASES = [
+  { v: "1.0.0", date: "2026-11-07", pin: "YappyChat 1.0: choose your seat at sign-in, every chat you moderate in one place, and a chat summary for your mod team.", items: [
+    ["Choose your seat when you sign in", "Moderator, Streamer or Viewer, right on the sign-in screen. Twitch is only asked for what that seat uses, and the buttons and activity rail are set up to suit you. Whispers and channel-owner tools ask the first time you use them."],
+    ["Stay signed in, update when you choose", "YappyChat no longer asks you to log in each day. New versions download in the background and wait in the top bar until you press Update ready. Inside, the app is more tightly sealed off, so only its own window can use its features."],
+    ["Every chat you moderate, in one place", "AutoMod, Mod activity and Unbans cover every chat you moderate, in each channel's colour when several are on screen. Moderators can start polls and predictions through Twitch's Mod View, and in your own channel Mods and VIPs and Banned users sit in the chat header."],
+    ["A tidier activity rail", "Chat tabs and moderation tabs sit in two groups, and new installs show each tab's name. Tools you add, like Chat filters, open in the panel like any other tab. Live has its own button in the top bar, and picking a channel from Went live opens its chat and stream."],
+    ["Cleaner user cards", "One moderation block with the timeouts in a single strip, the account's age, follow and subscription, and a copy button for their name. If someone changes their Twitch name, their messages show \"was oldname\" for a week and your notes follow them. Hover a sub badge for the tier and months."],
+    ["Warn with your rules", "Click into the reason box and your channel's rules and saved reasons appear underneath. Add or remove rules in Notes, beside Shield. Ban everywhere and Ban on sight wait under the … button."],
+    ["A chat summary for your mod team", "Mod tools > Summary (or /summary) writes a recap to paste into your team's Discord: how busy chat was, moderation totals for the whole team (no moderator is named), the most active chatters and the words behind bans and timeouts, with suggestions for blocked terms."],
+    ["Focus, for busy streams", "The moon in the top bar (or Ctrl+Shift+D) quiets YappyChat: Yappy sits still, pop-ups wait in the rail, only urgent sounds play and name effects stop moving. The header is calmer too: a dot only shows while chat is connecting."],
+    ["Streams your way", "Drag the divider between two chats and the streams resize to match. Minimised to the taskbar, streams keep playing; in the tray they pause. Emotes keep moving while a stream plays, and switching channel keeps its sound."],
+    ["Little things that add up", "Whispers stay after you close YappyChat. Give a macro its own command, like /blob. Spell check, fresh notification sounds, and bigger buttons with Compact layout off. A short note from the YappyChat team can appear in the top bar for known issues."]
+  ] },
+  { v: "0.20.1", date: "2026-10-31", fixes: true, pin: "0.20.1 is out: pinning works, your own messages can be pinned and replied to, and clear reasons when Twitch refuses a message.", items: [
+    ["Pinning works", "Pinning a message, timed pins and unpinning now work with Twitch. Your own messages can be pinned, replied to and deleted too, because chat is now sent the way Twitch recommends."],
+    ["/monitor and /restrict work", "Twitch was refusing them. They now monitor or restrict the person as they should."],
+    ["Clear reasons when a message isn't sent", "If Twitch refuses a message (slow mode, emote-only, followers-only, a timeout, a verified email needed and so on), it's marked Not sent, the reason is explained in plain words, and your text and reply go back in the box. The message box also says when a chat is emote-only, followers-only or slow."],
+    ["No more getting locked out of chat", "YappyChat now keeps you inside Twitch's sending limits and says how long to wait, instead of letting Twitch ignore your messages for up to an hour."],
+    ["Plain-English errors", "Twitch's technical error messages are replaced with what happened and what to do, and command help says exactly what to type."],
+    ["Moderation details", "Ban and timeout lines name the moderator even when Twitch sends the name a moment later, monitored chatters are marked straight away, and a double-clicked ban or timeout only acts once."],
+    ["Twitch's rules", "People you've blocked on Twitch are hidden in chats you don't moderate, deleted messages show as \"message deleted\" where you're not a moderator (as on Twitch), and mod buttons and Shield are hidden in chats you don't moderate."],
+    ["Yappy is quieter in big chats", "He no longer repeats the raid bar, and Settings > Yappy > Spam lets you set how big a spam wave or a rush of first-timers has to be, or let Automatic match each chat's size."],
+    ["Clearer icons", "Every tab and tool now has its own icon, so nothing shares one any more: an @ for Mentions, a mask for Suspicious users, an envelope for Whispers, a rocket for raids and more. Several Yappy skins are easier to see on the dark theme too."],
+    ["And one for fun", "Right-click Yappy when chat gets a bit much: he squishes and squeaks like a stress ball."]
+  ] },
+  { v: "0.20.0", date: "2026-10-28", pin: "0.20.0 is out: Mod activity names every moderator, a record on every user card, Yappy's own settings, Twitch's colours and reply threads.", items: [
+    ["Mod activity names every moderator", "Bans, timeouts and deletes say who did them, even when Twitch's feed arrives late or the mod used Twitch's own Mod View. Removing a timeout says \"removed the timeout\", and AutoMod messages someone else already handled say so."],
+    ["A record on every user card", "Tabs for Messages, Warnings, Timeouts, Bans and Notes, each with a count, like Twitch's mod view, with who did what and the message behind it. Add as many dated notes as you like. Chat history on the card shows at once and fills in as you scroll. If you don't moderate there, the card shows just Messages and Notes."],
+    ["Yappy has his own settings", "Settings > Yappy, with tabs for Spam, Raids, After you moderate, Notices and Tips, and a switch for everything he does. He only suggests slow mode when the same message turns up 20 times in 20 seconds, and only follows up on bans you made."],
+    ["Looks like Twitch", "Light and Dark use Twitch's own colours. Subs, gifted subs, raids, watch streaks and announcements get cards like Twitch's chat, and monitored chatters get a light red background."],
+    ["Reply threads and chat your way", "When several people reply in a chain, the replies open together in a Thread, like Twitch, and you can reply there. Settings > Chat can also put the newest messages at the top and limit GIFs to 2 to 5 lines tall."],
+    ["Streams your way", "Drag a stream onto the side of a chat to put the streams there, or onto another stream to swap them, and drag the divider to share the width. Close the last chat and up to four streams fill the window on their own. Logging in now signs the stream player in too, so channels you subscribe to play without ads, and the first screen opens a chat and its stream in one step."],
+    ["Easier to read", "One clock everywhere, in your timestamp format. Timeouts read \"for 10 minutes\", names and channels show as they appear in chat, mod buttons stay faint until you point at a message, tabs count new mentions, and Twitch errors are explained. Every pop-up notice and Yappy's tips appear in one place, just above the message box and on top of streams."],
+    ["Smoother in busy chats", "Big, fast chats and spam waves use much less of your computer: each line is about half the size, and lines scrolled out of view aren't redrawn. Settings > Chat can also delete chat logs older than 30 days, 90 days or a year. AutoMod holds show in chat history, and if Twitch limits how fast you can act, a note says your actions are waiting rather than lost."],
+    ["New emotes straight away", "When a streamer adds, removes or renames a 7TV or BetterTTV emote, it works in the next message without restarting, and a short line in chat says what changed. FrankerFaceZ emotes are re-checked every 10 minutes."],
+    ["A tidy uninstall", "Uninstalling asks whether to also remove your chat logs, settings and saved login, the stream player's sign-in and the error log. Anything you leave unticked stays for next time."]
+  ] }
+];
+root.YC_RELEASES = RELEASES;
+if (typeof module !== 'undefined') module.exports = RELEASES;
+})(typeof window !== 'undefined' ? window : globalThis);
