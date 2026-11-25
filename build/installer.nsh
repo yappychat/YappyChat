@@ -15,6 +15,16 @@
 ; After every install and update: tell Windows the app's icon may have changed, so the Start menu, desktop and pinned taskbar shortcuts redraw
 ; Yappy instead of a blank icon left over from the copy that was just replaced. SHChangeNotify(SHCNE_ASSOCCHANGED) refreshes the shell's icons;
 ; ie4uinit -show (Windows 10 and 11) rebuilds the user's icon cache. Both are Windows' own tools and only touch the icon cache.
+!include "WinVer.nsh"
+; YappyChat is built on Electron, which needs Windows 10 or later. On older Windows the installer would finish and the app would then refuse to open
+; with a confusing system error, so the installer says so first.
+!macro customInit
+  ${IfNot} ${AtLeastWin10}
+    MessageBox MB_OK|MB_ICONSTOP "YappyChat needs Windows 10 or Windows 11. This computer has an older version of Windows, so YappyChat can't run on it."
+    Quit
+  ${EndIf}
+!macroend
+
 !macro customInstall
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x0000, p 0, p 0)'
   ${If} ${FileExists} "$SYSDIR\ie4uinit.exe"

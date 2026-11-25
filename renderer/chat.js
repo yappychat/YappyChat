@@ -12,7 +12,7 @@ const blHit = (w) => !!(S._bl && S._bl.length) && S._bl.some((r) => r.test(w));
 function matchHighlight(m) {
   if (m.login === S.me.login) return null;
   const lc = m.text.toLowerCase();
-  if (S.settings.hlMention) { const me = S.me.login; if (!S._meRx || S._meRx.l !== me) S._meRx = { l: me, rx: new RegExp('(^|[^a-z0-9_])@?' + me.replace(/[^\w]/g, '') + '($|[^a-z0-9_])') }; if (S._meRx.rx.test(lc)) return { color: '' }; }
+  if (S.settings.hlMention) { const me = S.me.login; if (!S._meRx || S._meRx.l !== me) S._meRx = { l: me, rx: new RegExp('(^|[^a-z0-9_])@?' + me.replace(/[^\w]/g, '') + '($|[^a-z0-9_])') }; if (S._meRx.rx.test(lc)) return { color: '', mention: true }; }
   for (const h of S._hl || []) if (h.rx.test(m.text)) return h;
   return null;
 }
@@ -47,28 +47,33 @@ function syncJoins() {
 }
 // Rebuilds a chat that missed messages while it was out of view: clears it and loads the recent messages again, like a fresh open
 function refreshChat(c) {
-  c.stale = false; [...c.list.children].forEach((n) => { if (n !== c.histEnd) n.remove(); }); c.msgs.clear(); c.heldNodes = null; c.held = 0; c.histEnd.classList.add('hidden'); c.histN = 0; c.stick = true;
+  c.stale = false; [...c.list.children].forEach((n) => { if (n !== c.histEnd) n.remove(); }); c.msgs.clear(); c.heldNodes = null; c.held = 0; c.histEnd.classList.add('hidden'); c.histN = 0; c.stick = true; c.list.classList.remove('up');
   loadHistory(c).catch((e) => dbg('history ' + e));
 }
 setInterval(syncJoins, 5000);
 // Chat connection. Reconnects wait longer each time (1, 2, 4 … up to 60 seconds, with a little randomness so thousands of apps don't all retry at once),
 // and a quiet connection is tested with a PING every 4 minutes: no answer within 15 seconds means it is dead, even if Windows never said so.
-let ircFails = 0, ircPing = 0, ircPong = 0;
+let ircFails = 0, ircPing = 0, ircPong = 0, ircPingAt = 0;
 function connect() {
   clearTimeout(S.retry); clearInterval(ircPing);
   const ws = (S.ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443'));
-  let opened = false; ircPong = Date.now(); setConn(ircFails ? 'down' : 'wait');
+  let opened = false; ircPong = Date.now(); ircPingAt = 0; setConn(ircFails ? 'down' : 'wait');
   ws.onopen = () => { opened = true; ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands' + (S.settings.trackJoins !== false ? ' twitch.tv/membership' : '')); ws.send('PASS oauth:' + S.token); ws.send('NICK ' + S.me.login); S.chats.forEach((x) => { x.joined = false; }); S.joinQ = [...S.chats.keys()]; pumpJoins(); };
-  ws.onmessage = (e) => { ircPong = Date.now(); if (opened && S.conn !== 'ok') setConn('ok'); if (ircFails && opened) ircFails = 0; e.data.split('\r\n').filter(Boolean).forEach((ln) => { try { handleLine(ln); } catch (x) { dbg('chat line ' + x); } }); }; // one bad line must not drop the rest of the batch
+  ws.onmessage = (e) => { ircPong = Date.now(); if (opened && S.conn !== 'ok') setConn('ok'); if (ircFails && opened) ircFails = 0; ingest(e.data.split('\r\n').filter(Boolean)); };
   ircPing = setInterval(() => {
     if (S.ws !== ws || ws.readyState !== 1) return;
-    if (Date.now() - ircPong > 4 * 60000 + 15000) { try { ws.close(); } catch (e) {} return; } // no reply to the last ping: start again
-    if (Date.now() - ircPong > 4 * 60000) ws.send('PING :yappychat');
+    // Only a PING we actually sent and that got no reply counts as a dead connection. A quiet chat (an offline channel) is not one, and
+    // Windows can run this check late while YappyChat is minimised, so the wait is measured from when the PING went out, not from the last message
+    const now = Date.now();
+    if (ircPingAt && ircPong < ircPingAt) { if (now - ircPingAt > 20000) { try { ws.close(); } catch (e) {} } return; }
+    if (now - ircPong > 4 * 60000) { ircPingAt = now; ws.send('PING :yappychat'); }
   }, 15000);
   ws.onclose = async () => {
     clearInterval(ircPing); if (!S.token || S.ws !== ws) return; setConn('down');
-    if (!ircFails) S.chats.forEach((c) => notice(c, 'Lost the connection to Twitch chat. Reconnecting…'));
-    const wait = Math.min(60000, 1000 * 2 ** Math.min(ircFails, 6)) * (0.8 + Math.random() * 0.4); ircFails++;
+    const planned = S.planned; S.planned = false; // Twitch moving us to another server is routine: reconnect quietly and straight away
+    if (!planned && window.Usage) Usage.count('reconnect'); // how often chat drops, for the health numbers (anonymous, daily totals)
+    if (!ircFails && !planned) S.chats.forEach((c) => notice(c, 'Lost the connection to Twitch chat. Reconnecting…'));
+    const wait = planned ? 300 : Math.min(60000, 1000 * 2 ** Math.min(ircFails, 6)) * (0.8 + Math.random() * 0.4); if (!planned) ircFails++;
     S.retry = setTimeout(async () => { try { const t = await cg.getToken(); if (t) S.token = t; } catch (e) {} if (S.token && S.ws === ws) connect(); }, wait); // a renewed login is picked up here
   };
 }
@@ -90,12 +95,32 @@ function parseIrc(line) {
   if (trailing === null && parts.length > 2) trailing = parts.pop();
   return { tags, prefix, cmd: parts[0], params: parts.slice(1), trailing };
 }
+// Incoming lines. A normal chat is handled as the lines arrive. A flood (a huge raid, a busy chat catching up after sleep) is queued and worked
+// through in 10 ms slices, so the window keeps responding. Pings and reconnect requests never wait. If the queue ever passes IN_MAX the oldest
+// chat messages are skipped (everything else is kept) and the open chat says so once a minute.
+let inQ = [], inBusy = false, inSkipped = 0, inSkipNote = 0; const IN_MAX = 20000, IN_SLICE = 10, IN_DIRECT = 40;
+const inChan = typeof MessageChannel === 'function' ? new MessageChannel() : null; // not slowed down while the window is minimised, unlike timers
+if (inChan) inChan.port1.onmessage = () => drainIn();
+const runLine = (ln) => { try { handleLine(ln); } catch (x) { dbg('chat line ' + x); } }; // one bad line must not drop the rest of the batch
+function ingest(lines) {
+  if (!inQ.length && lines.length <= IN_DIRECT) { lines.forEach(runLine); return; }
+  for (const ln of lines) { if (ln.charCodeAt(0) === 80 && ln.startsWith('PING') || ln.endsWith(' RECONNECT')) runLine(ln); else inQ.push(ln); }
+  if (inQ.length > IN_MAX) { let drop = inQ.length - IN_MAX; inSkipped += drop; inQ = inQ.filter((l) => drop > 0 && l.includes(' PRIVMSG ') ? (drop--, false) : true); }
+  if (inQ.length && !inBusy) { inBusy = true; inChan ? inChan.port2.postMessage(0) : setTimeout(drainIn, 0); }
+}
+function drainIn() {
+  const t0 = performance.now(); let i = 0;
+  while (i < inQ.length && performance.now() - t0 < IN_SLICE) runLine(inQ[i++]);
+  inQ = inQ.slice(i);
+  if (inSkipped && Date.now() - inSkipNote > 60000) { inSkipNote = Date.now(); const c = S.chats.get(S.active); if (c) notice(c, `Chat is moving faster than YappyChat can show. ${inSkipped.toLocaleString()} messages were skipped.`, 'mod'); inSkipped = 0; }
+  if (inQ.length) inChan ? inChan.port2.postMessage(0) : setTimeout(drainIn, 0); else inBusy = false;
+}
 function handleLine(line) {
   const p = parseIrc(line), c = S.chats.get((p.params[0] || '').replace('#', ''));
   if (c && !chatLive(c) && ['PRIVMSG', 'USERNOTICE', 'CLEARCHAT', 'CLEARMSG', 'JOIN', 'PART'].includes(p.cmd)) { c.stale = true; if (p.cmd === 'PRIVMSG') bgHit(c, p); return; } // not open: nothing is shown or logged, but a mention or highlight is still counted
   switch (p.cmd) {
     case 'PING': S.ws.send('PONG :tmi.twitch.tv'); break;
-    case 'RECONNECT': try { S.ws.close(); } catch (e) {} break; // Twitch is restarting this server: reconnect straight away (onclose takes care of it)
+    case 'RECONNECT': S.planned = true; try { S.ws.close(); } catch (e) {} break; // Twitch is restarting this server: reconnect straight away (onclose takes care of it)
     case 'PRIVMSG': if (c) onChat(c, p); break;
     case 'JOIN': case 'PART': if (c) { const u = p.prefix.split('!')[0]; if (u) { c.present = c.present || new Set(); p.cmd === 'JOIN' ? c.present.add(u) : c.present.delete(u); } if (S.settings.trackJoins !== false) trackJP(c, p); } break;
     case '353': { const cc = S.chats.get((p.params[p.params.length - 1] || '').replace('#', '')); if (cc) { cc.present = cc.present || new Set(); (p.trailing || '').split(' ').filter(Boolean).forEach((n) => cc.present.add(n)); } break; }
@@ -131,7 +156,7 @@ function pruneFeeds() {
 }
 // In chats you don't moderate, a deleted message's words are hidden, as Twitch shows it to viewers (and as Twitch asks apps to do). Where you moderate,
 // Settings > Appearance > "Keep deleted messages visible" decides.
-function markGone(node, label, red, c) { if (node.classList.contains('gone')) return; node.classList.add('gone'); if (c && !(isMod(c) || isOwner(c))) node.classList.add('gone-v'); node.querySelector('.line').prepend(el('span', 'tag' + (red ? ' red' : ''), esc(label))); }
+function markGone(node, label, red, c) { if (node.classList.contains('gone')) return; node.classList.add('gone', 'justgone'); setTimeout(() => node.classList.remove('justgone'), 900); if (c && !(isMod(c) || isOwner(c))) node.classList.add('gone-v'); node.querySelector('.line').prepend(el('span', 'tag' + (red ? ' red' : ''), esc(label))); }
 function onClear(c, p) {
   const who = p.trailing, dur = p.tags['ban-duration'];
   if (!who) { logAct(c, 'clear', 'Chat was cleared'); return notice(c, 'Chat was cleared by a moderator', 'mod'); }
@@ -178,7 +203,8 @@ function onChat(c, p, hist) {
   if (am) { text = am[1]; action = true; }
   const login = p.prefix.split('!')[0];
   const src = t['source-room-id'] || '', foreign = !!src && src !== t['room-id']; // shared chat: this message was sent in another streamer's chat
-  const m = { id: t.id, uid: t['user-id'], login, name: t['display-name'] || login, color: t.color, badges: ((foreign ? t['source-badges'] : t.badges) || '').split(',').filter(Boolean), binfo: (foreign ? t['source-badge-info'] : t['badge-info']) || '', text, action, emotes: t.emotes, ts: +t['tmi-sent-ts'] || Date.now(), first: !hist && !foreign && t['first-msg'] === '1', hist: !!hist, src, foreign, gifs: t.gifs || '', paid: t['pinned-chat-paid-amount'] ? { amount: +t['pinned-chat-paid-amount'], exp: +t['pinned-chat-paid-exponent'] || 0, cur: t['pinned-chat-paid-currency'] || '', level: t['pinned-chat-paid-level'] || '', sys: t['pinned-chat-paid-is-system-message'] === '1' } : null };
+  const m = { id: t.id, uid: t['user-id'], login, name: t['display-name'] || login, color: t.color, badges: ((foreign ? t['source-badges'] : t.badges) || '').split(',').filter(Boolean), binfo: (foreign ? t['source-badge-info'] : t['badge-info']) || '', text, action, emotes: t.emotes, ts: +t['tmi-sent-ts'] || Date.now(), first: !hist && !foreign && t['first-msg'] === '1', hist: !!hist, src, foreign, gifs: t.gifs || '', paid: t['pinned-chat-paid-amount'] ? { amount: +t['pinned-chat-paid-amount'], exp: +t['pinned-chat-paid-exponent'] || 0, cur: t['pinned-chat-paid-currency'] || '', level: t['pinned-chat-paid-level'] || '', sys: t['pinned-chat-paid-is-system-message'] === '1' } : null,
+    bits: +t.bits || 0, hl: t['msg-id'] === 'highlighted-message', reward: !!t['custom-reward-id'], fx: t['msg-id'] === 'animated-message' ? t['animation-id'] || 'effect' : '', giant: t['msg-id'] === 'gigantified-emote-message' }; // Bits, channel points and power-ups, marked like Twitch does
   nameSeen(m.uid, login);
   if (foreign) (c.sharedUsers || (c.sharedUsers = new Set())).add(login); // viewers from the other channels in a shared chat
   if (foreign && !hist && !c.shared && (!c.sharedCheck || Date.now() - c.sharedCheck > 30000)) { c.sharedCheck = Date.now(); loadShared(c).catch(() => {}); }
@@ -190,15 +216,16 @@ function onChat(c, p, hist) {
 // Extra badges beside a chatter's messages. Raid is a best guess: someone new to this chat in the minutes after a raid arrived.
 function userFlags(c, m, wasKnown) {
   const out = [], now = Date.now(), l = m.login; if (m.own || m.foreign) return out;
-  const was = S.renamed && S.renamed.get(l); if (was && Date.now() - was.at < 7 * 864e5) out.push(['was ' + was.from, 'renamed', `Changed their name from ${was.from}. Their user card lists every name YappyChat has seen them use.`]);
+  const T = S.settings, was = T.tagRenamed !== false && S.renamed && S.renamed.get(l); if (was && Date.now() - was.at < 7 * 864e5) out.push(['was ' + was.from, 'renamed', `Changed their name from ${was.from}. Their user card lists every name YappyChat has seen them use.`]);
   const st = c.susp && c.susp.get(l);
   if (st === 'restricted') out.push(['Restricted', 'red', 'Restricted: only moderators see what they write']); else if (st === 'active_monitoring') out.push(['Monitored', 'red', 'A moderator is monitoring this person']);
-  const to = c.toAt && c.toAt.get(l); if (to && now - to < 5 * 60000) out.push(['Timed out recently', 'tofade', `Timed out ${Math.max(1, Math.round((now - to) / 60000))} min ago`, `animation-delay:${Math.round(5 * 60000 - (now - to))}ms`]); // fades out 5 minutes after the timeout
+  const to = T.tagTimedOut !== false && c.toAt && c.toAt.get(l); if (to && now - to < 5 * 60000) out.push(['Timed out recently', 'tofade', `Timed out ${Math.max(1, Math.round((now - to) / 60000))} min ago`, `animation-delay:${Math.round(5 * 60000 - (now - to))}ms`]); // fades out 5 minutes after the timeout
   if (c.raid && now - c.raid.at < 4 * 60000 && !wasKnown && !/(broadcaster|moderator|vip|subscriber|founder)\//.test((m.badges || []).join(','))) (c.raiders = c.raiders || new Set()).add(l);
-  if (c.raiders && c.raiders.has(l) && c.raid && now - c.raid.at < 15 * 60000) out.push(['Raid', 'raid tofade', `Probably came with the raid from ${c.raid.from} (a best guess: they were new in chat just after it)`, `animation-delay:${Math.round(15 * 60000 - (now - c.raid.at))}ms`]); // gone 15 minutes after the raid
+  if (T.tagRaid !== false && c.raiders && c.raiders.has(l) && c.raid && now - c.raid.at < 15 * 60000) out.push(['Raid', 'raid tofade', `Probably came with the raid from ${c.raid.from} (a best guess: they were new in chat just after it)`, `animation-delay:${Math.round(15 * 60000 - (now - c.raid.at))}ms`]); // gone 15 minutes after the raid
   return out;
 }
 function addMessage(c, m) {
+  if (!m.hist && c.login === S.active && !c.tn) tnLoad(c);
   const blk = !m.own && m.uid && S.blocked && S.blocked.has(String(m.uid)); if (blk && !(isMod(c) || isOwner(c))) return; // someone you blocked: hidden unless you moderate here
   if (m.foreign && S.settings.sharedMsgs === false) return; // Settings > Chat: leave out what other channels say in a shared chat
   if (m.id && !m.hist) { c.seenIds = c.seenIds || new Set(); if (c.seenIds.has(m.id)) return; c.seenIds.add(m.id); if (c.seenIds.size > 3000) c.seenIds = new Set([...c.seenIds].slice(-1500)); } // the same message can arrive twice (a reconnect, or a shared chat), but is shown and logged once
@@ -208,7 +235,7 @@ function addMessage(c, m) {
   const u = c.users.get(m.login) || { id: m.uid, name: m.name, msgs: [], first: m.ts }; u.id = u.id || m.uid; if (!hist) u.live = true;
   u.msgs.push({ text: m.text, ts: m.ts, id: m.id, emo: m.emotes, gifs: m.gifs }); if (u.msgs.length > (c.shown ? 40 : 15)) u.msgs.shift(); u.badges = m.badges; if (m.binfo) { const mo = subMonths(m.binfo); if (mo) u.sub = { months: mo, tier: subTier(m.badges.find((x) => /^(subscriber|founder)\//.test(x)) || '') }; } if (!hist) u.n = (u.n || 0) + 1; // u.n: messages this session (the chat summary's most active chatters)
   c.users.delete(m.login); c.users.set(m.login, u); while (c.users.size > 4000) c.users.delete(c.users.keys().next().value); // most recently active last; the quietest chatters drop out of big channels
-  const toks = tokens(c, m.text, m.emotes, m.own, m.gifs); noteConvo(c, m); dashMsg(c, m);
+  const toks = tokens(c, m.text, m.emotes, m.own, m.gifs, m.bits); noteConvo(c, m); dashMsg(c, m);
   if (!hist) { c.stat.msgs++; c.stat.emotes += toks.filter((x) => x.t === 'e').length; c.times.push(m.ts); if (c.times.length > 4000) { const cut = Date.now() - 60000; c.times = c.times.filter((t) => t > cut); } if (m.first) c.stat.firsts++; const mk = Math.floor(m.ts / 60000); c.perMin = c.perMin || new Map(); c.perMin.set(mk, (c.perMin.get(mk) || 0) + 1); if (c.perMin.size > 1440) c.perMin.delete(c.perMin.keys().next().value); } // per-minute counts for the summary (a day at most)
   if (!hist && spamFold(c, m, hit || watched)) return; // the same text again within seconds: '×2' on the first line instead of a new one
   const d = el('div', 'msg' + (hist ? ' hist' : '') + (hit ? ' hl' : '') + (watched ? ' watched' : '') + (m.action ? ' action' : '') + (m.first ? ' first' : '') + (!hist && !m.own && c.susp && c.susp.get(m.login) ? ' susp' : ''));
@@ -221,16 +248,17 @@ function addMessage(c, m) {
   const av = s.sharedAvatars !== false && m.src && (m.foreign || (c.shared && c.shared.ids.length > 1)) ? roomAv(c, m.src) : '';
   const pk = Perks.parts(m.uid), firstSeen = !hist && pk && pk.ent && !S.perkSeen.has(m.uid), isSelf = m.uid === S.me.id, canMod = !isSelf && m.id && modKnown(c) && !(m.foreign ? /(^|,)(broadcaster|moderator|lead_moderator|staff|admin)\//.test(m.badges.join(',')) : /broadcaster\//.test(m.badges.join(','))) && s.modButtons !== 'off' && !s.notMod && !((s.chanStyle || {})[c.login] || {}).noMod;
   if (pk && pk.mbg) d.className += ' ' + pk.mbg; // a supporter's message background (switched off in Settings by body.mbg-off)
-  const gutter = s.modButtons === 'always' && canMod, note = (s.notes || {})[m.login];
+  const gutter = s.modButtons === 'always' && canMod, note = (s.notes || {})[m.login] || (tnNotes(c, m.uid).length ? { text: tnNotes(c, m.uid).map((x) => x.text).join(' · ') } : null);
   // The hover toolbar is only built when the pointer reaches a message (see toolsHtml), so hundreds of messages do not each hold a dozen icons
   const tl = (s.modButtons === 'hover' && canMod ? 1 : 0) | (m.id && s.flyout ? 2 : 0) | (gutter ? 4 : 0); if (tl) d.dataset.tl = tl; // 4: the gutter shows four buttons, so Purge sits in the hover toolbar
   if (gutter) d.classList.add('hasmod'); else if (s.modButtons === 'always' && !s.notMod && modKnown(c) && isMod(c) && !((s.chanStyle || {})[c.login] || {}).noMod) d.classList.add('modpad'); // lines nobody can moderate (the streamer, other channels' mods) stay lined up with the rest
   if (firstSeen) S.perkSeen.add(m.uid);
+  const nk = S.settings.nicks ? nickOf(m.uid) || nickByLogin(m.login) : ''; /* a nickname you gave them */
   d.innerHTML = (m.reply ? `<div class="reply${m.reply.login ? ' conv' : ''}"${m.reply.login ? ` data-with="${esc(m.reply.login)}" data-tip="Open the conversation between these two"` : ''}>${ico('chat', 12)} Replying to @${esc(m.reply.name)}: ${esc(m.reply.body)}<span class="rcount"></span><span class="rthread"></span></div>` : '') +
-    `<div class="line">${m.first ? '<span class="tag">First message</span>' : ''}${fl.map((f) => `<span class="tag ${f[1]}" data-tip="${esc(f[2])}"${f[3] ? ` style="${f[3]}"` : ''}>${f[0]}</span>`).join('')}${gutter ? `<span class="mod">${modBtns(true)}</span>` : ''}` +
+    `<div class="line">${m.first && S.settings.tagFirst !== false ? '<span class="tag">First message</span>' : ''}${fl.map((f) => `<span class="tag ${f[1]}" data-tip="${esc(f[2])}"${f[3] ? ` style="${f[3]}"` : ''}>${f[0]}</span>`).join('')}${gutter ? `<span class="mod">${modBtns(true)}</span>` : ''}` +
     (s.timestamps ? `<span class="ts">${fmtTs(m.ts, s.tsFormat)}</span> ` : '') +
     av + badges + (pk ? pk.badge : '') + (pk ? pk.title : '') +
-    `<span class="${pk ? pk.cls : 'nm'}" style="${pk ? pk.style : ''}"${pk && pk.tip ? ` data-tip="${esc(pk.tip)}" data-perk="1"` : ''}><span class="name${s.blNames !== false && (blHit(m.login) || blHit(m.name)) ? ' bl' : ''}" style="${nameStyle(m.color, m.login)}">${esc(m.name)}</span></span>` +
+    `<span class="${pk ? pk.cls : 'nm'}" style="${pk ? pk.style : ''}"${pk && pk.tip ? ` data-tip="${esc(pk.tip)}" data-perk="1"` : ''}><span class="name${s.blNames !== false && (blHit(m.login) || blHit(m.name)) ? ' bl' : ''}" style="${nameStyle(m.color, m.login)}">${nameHtml(m.name, m.login, nk)}</span></span>` +
     (note ? `<span class="notei" data-tip="${esc(note.text.slice(0, 120))}">${ico('note', 12)}</span>` : '') +
     (watched ? `<span class="notei" data-tip="On your watch list">${ico('eye', 12)}</span>` : '') +
     `<span class="colon">${m.action ? '' : ':'}</span> <span class="mt">${bodyHtml(toks)}</span></div>` +
@@ -242,6 +270,7 @@ function addMessage(c, m) {
   if (c.search) applySearch(c, d);
   acctBadge(c, m, d);
   if (blk) { d.classList.add('blockedu'); const ln = d.querySelector('.line'); if (ln) { const tg = el('span', 'tag', 'Blocked'); tg.dataset.tip = "You've blocked this person on Twitch. Their messages only show in chats you moderate."; ln.prepend(tg); } }
+  markSpecial(d, m);
   if (hist) return push(c, d, true);
   if (m.own) c.lastOwn = { d, t: Date.now() };
   if (m.paid) { d.classList.add('paid', 'pinned'); d.querySelector('.line').prepend(el('span', 'tag pintag', esc(paidLabel(m.paid)))); }
@@ -249,6 +278,7 @@ function addMessage(c, m) {
   if (!m.foreign) { queueLinks(c, m); checkBanList(c, m); }
   if (m.first && !m.own) { S.firsts.unshift({ c: c.login, uid: m.uid, login: m.login, name: m.name, text: m.text, ts: m.ts, id: m.id }); S.firsts.length = Math.min(S.firsts.length, 100); bump('firsts'); play('first', c.login); }
   noteHit(c, m, hit, watched);
+  if (m.hl && !hit && !watched && !m.own && !m.foreign) play('highlight', c.login); // a channel-points Highlighted message uses the same sound as your highlights
   if (hit || watched) { try { mentionPill(c, d, m.name); } catch (e) {} }
 }
 function notice(c, text, kind = '') { push(c, el('div', 'notice ' + (kind === 'mod' ? 'modn' : kind), esc(text || ''))); } // 'mod' alone is the mod-button gutter class, so notices use 'modn'
@@ -256,14 +286,24 @@ function push(c, node, hist) {
   if (hist) { node.classList.add('old'); return c.list.insertBefore(node, c.histEnd); } // recent history goes above the "live from here" divider
   // While the pointer is over the chat nothing moves at all, wherever you are scrolled: new lines wait in a queue (nothing is trimmed from the top) and join the chat when the pointer leaves
   if (c.hover && !c.list.matches(':hover')) { c.hover = false; flushHeld(c); } // the pointer left without a mouseleave (the chat moved or was hidden): never stay paused
-  if (c.hover && S.settings.pauseHover !== false) { (c.heldNodes = c.heldNodes || []).push(node); c.held = c.heldNodes.length; c.resume.textContent = `Paused · ${c.held} new`; c.resume.classList.remove('hidden'); return; }
+  // Scrolled up in a busy chat: once the chat holds as many lines as it may, new ones wait in the queue too, so nothing is ever taken
+  // away above what you are reading (removing lines there made the chat jump, flicker and go blank). They join when you go back down.
+  if ((c.hover && S.settings.pauseHover !== false) || (!c.stick && c.shown && c.list.children.length >= upCap(c))) { hold(c, node); return; }
   c.list.append(node);
   { let o = node, i = 0; while (o && i < 30) { o = o.previousElementSibling; i++; } if (o && o.classList) o.classList.add('old'); } // only the newest 30 messages keep animated perk effects
   trimChat(c);
   if (c.stick) stickScroll(c);
 }
 // Keeps a chat to its line limit. Scrolled up, the limit is much higher, and anything removed above is made up for in the scroll position, so what you are reading never moves.
+const upCap = (c) => 3100 + (c.histN || 0); // lines a chat may hold while you are scrolled up in it
+const HELD_MAX = 3000; // waiting lines beyond this are dropped, oldest first (they would be trimmed on the way back down anyway)
+function hold(c, node) {
+  const q = (c.heldNodes = c.heldNodes || []); q.push(node);
+  while (q.length > HELD_MAX) { const o = q.shift(); if (o.dataset && o.dataset.id) c.msgs.delete(o.dataset.id); }
+  c.held = q.length; c.resume.textContent = `Paused · ${c.held} new`; c.resume.classList.remove('hidden');
+}
 function trimChat(c) {
+  if (!c.stick && c.shown) return; // never while you are reading further up: see push()
   const cap = (c.shown ? 600 : 160) + (c.histN || 0) + (c.stick ? 0 : c.shown ? 2500 : 400); // a chat you can't see keeps less, even if you left it scrolled up
   let over = c.list.children.length - cap; if (over <= 0) return;
   const gone = []; for (let f = c.list.firstChild; f && gone.length < over; f = f.nextSibling) if (f !== c.histEnd) gone.push(f);
@@ -274,11 +314,12 @@ function trimChat(c) {
 }
 // The lines that waited while the pointer was over the chat now join it
 function flushHeld(c) {
-  const q = c.heldNodes; c.heldNodes = null; c.held = 0; if (!q || !q.length) return;
+  let q = c.heldNodes; c.heldNodes = null; c.held = 0; if (!q || !q.length) return;
+  if (!c.stick && c.shown) { const room = Math.max(0, upCap(c) - c.list.children.length); if (q.length > room) { c.heldNodes = q.slice(room); c.held = c.heldNodes.length; q = q.slice(0, room); } if (!q.length) { c.resume.textContent = `Paused · ${c.held} new`; return; } } // still scrolled up: only what fits
   q.forEach((n) => c.list.append(n));
   { let o = q[q.length - 1], i = 0; while (o && i < 30) { o = o.previousElementSibling; i++; } if (o && o.classList) o.classList.add('old'); }
   trimChat(c);
-  if (!c.stick) { c.resume.textContent = 'Jump to latest'; c.resume.classList.remove('hidden'); }
+  if (!c.stick) { c.resume.textContent = c.held ? `Paused · ${c.held} new` : 'Jump to latest'; c.resume.classList.remove('hidden'); }
 }
 // One scroll per frame however many messages arrived, instead of a forced layout for every message
 // Scrolls to the newest line, then checks once more on the next frame: a line whose emotes or badges finished sizing can be a little taller than first drawn
@@ -329,11 +370,11 @@ function badgeTip(b, info) {
 }
 function addEmotes(map, bttv, ffz, stv) {
   const bl = Array.isArray(bttv) ? bttv : bttv ? [...(bttv.channelEmotes || []), ...(bttv.sharedEmotes || [])] : [];
-  bl.forEach((e) => map.set(e.code, bttvEm(e)));
+  bl.forEach((e) => map.set(e.code, { ...bttvEm(e), by: (e.user && (e.user.displayName || e.user.name)) || '' }));
   const abs = (u) => (u.startsWith('//') ? 'https:' + u : u);
-  if (ffz && ffz.sets) Object.values(ffz.sets).forEach((set) => (set.emoticons || []).forEach((e) => map.set(e.name, { src: 'ffz', url: abs(e.urls['2'] || e.urls['1']), fb: abs(e.urls['1'] || e.urls['2']) })));
+  if (ffz && ffz.sets) Object.values(ffz.sets).forEach((set) => (set.emoticons || []).forEach((e) => map.set(e.name, { src: 'ffz', id: String(e.id || ''), url: abs(e.urls['2'] || e.urls['1']), fb: abs(e.urls['1'] || e.urls['2']), big: abs(e.urls['4'] || e.urls['2'] || e.urls['1']), by: (e.owner && (e.owner.display_name || e.owner.name)) || '' })));
   const sl = stv ? stv.emotes || (stv.emote_set && stv.emote_set.emotes) || [] : [];
-  sl.forEach((e) => map.set(e.name, stvEm(e)));
+  sl.forEach((e) => map.set(e.name, { ...stvEm(e), by: (e.data && e.data.owner && (e.data.owner.display_name || e.data.owner.username)) || '' }));
 }
 // One emote from BetterTTV or 7TV as chat draws it (also used when one is added while YappyChat is open, see liveemotes.js)
 const bttvEm = (e) => ({ src: 'bttv', id: e.id, url: `https://cdn.betterttv.net/emote/${e.id}/2x.webp`, fb: `https://cdn.betterttv.net/emote/${e.id}/1x.webp https://cdn.betterttv.net/emote/${e.id}/3x.webp https://cdn.betterttv.net/emote/${e.id}/2x.png https://cdn.betterttv.net/emote/${e.id}/2x` });
@@ -347,6 +388,8 @@ async function loadChannelAssets(c) {
   const fromApi = (e) => { const im = e.images || {}, t = twEmote(e.id); return { url: t.url, fb: [im.url_2x, im.url_1x, im.url_4x, t.fb].filter(Boolean).join(' ') }; };
   c.twitch = ((te.json && te.json.data) || []).map((e) => ({ id: e.id, name: e.name, type: e.emote_type, ...fromApi(e) }));
   c.twitchMap.clear(); c.twitch.forEach((e) => c.twitchMap.set(e.name, { src: 'twitch', url: e.url, fb: e.fb, id: e.id }));
+  c.twitch.forEach((e) => TW_EMOTE_KIND.set(e.id, { kind: e.type, chan: c.name })); // for the emote hover card: "Subscriber emote from <channel>"
+  loadCheers(c);
   c.assetsLoaded = true; c.assetsAt = Date.now(); if (c.onAssets) c.onAssets();
 }
 // Emotes follow the chat you are looking at: reload when it is opened, switched to, or has gone stale
@@ -363,15 +406,43 @@ async function loadGlobals() {
   S.twitchGlobalMap.clear(); S.twitchGlobal.forEach((e) => S.twitchGlobalMap.set(e.name, { src: 'twitch', url: e.url, fb: e.fb }));
 }
 async function reloadEmotes() { S.imgFail = {}; await loadGlobals(); for (const c of S.chats.values()) await loadChannelAssets(c); toast('Emotes reloaded'); }
-function tokens(c, text, emotesTag, own, gifsTag) {
+// Cheers: Twitch's animated cheer emotes for words like Cheer100 in a message that carried bits, with the amount in the tier's colour
+async function loadCheers(c) {
+  try { const r = await helix('bits/cheermotes', { query: { broadcaster_id: c.id } }); if (!ok(r)) return; const m = new Map();
+    ((r.json && r.json.data) || []).forEach((x) => m.set(String(x.prefix).toLowerCase(), (x.tiers || []).map((t) => { const im = (t.images && (t.images.dark || t.images.light)) || {}; const a = im.animated || im.static || {}; return { min: +t.min_bits || 0, color: t.color || '#9147ff', url: a['2'] || a['1.5'] || a['1'] || '' }; }).sort((a, b) => b.min - a.min)));
+    c.cheer = m; } catch (e) {}
+}
+function cheerTok(c, w) {
+  const mm = /^([a-z][a-z0-9]*?)(\d+)$/i.exec(w); if (!mm || !c.cheer) return null; const tiers = c.cheer.get(mm[1].toLowerCase()); if (!tiers || !tiers.length) return null;
+  const n = +mm[2], tier = tiers.find((t) => n >= t.min) || tiers[tiers.length - 1]; return tier.url ? { t: 'c', url: tier.url, n, color: tier.color, name: w } : null;
+}
+const TW_EMOTE_KIND = new Map();
+// The emote hover card, like Chatterino and 7TV: a large picture, the name, and where it's from (with who made it, for 7TV, BetterTTV and FrankerFaceZ)
+const EM_SRC = { '7tv': '7TV emote', bttv: 'BetterTTV emote', ffz: 'FrankerFaceZ emote' }, TW_KIND = { subscriptions: 'Subscriber emote', follower: 'Follower emote', bitstier: 'Bits emote', globals: 'Twitch global emote', smilies: 'Twitch global emote' };
+function emoteCard(img) {
+  const [src, id, by] = String(img.dataset.em || '').split('|'), u = img.currentSrc || img.src;
+  const big = src === 'twitch' ? u.replace(/\/[0-9.]+$/, '/3.0') : src === '7tv' ? u.replace(/\/[0-9]x\.(webp|avif|png|gif)$/, '/4x.$1') : src === 'bttv' ? u.replace(/\/[0-9]x(\.\w+)?$/, '/3x$1') : src === 'ffz' ? u.replace(/\/[0-9]$/, '/4') : u;
+  let from = EM_SRC[src] || 'Twitch emote'; if (src === 'twitch') { const k = TW_EMOTE_KIND.get(id); if (k) from = (TW_KIND[k.kind] || 'Twitch emote') + (k.kind === 'subscriptions' || k.kind === 'follower' || k.kind === 'bitstier' ? ' · ' + k.chan : ''); }
+  return `<img class="emc-i" src="${esc(big)}" data-fb="${esc(u)}" alt="" referrerpolicy="no-referrer"><b>${esc(img.alt)}</b><span>${esc(from)}${by && src !== 'twitch' ? ' · by ' + esc(by) : ''}</span>`;
+}
+// Highlighted messages, channel points, bits and power-ups: a background and a small tag, like Twitch
+function markSpecial(d, m) {
+  const mt = d.querySelector('.mt'), tag = (txt, cls, tip) => { if (!mt) return; const x = el('span', 'tag sp ' + cls, esc(txt)); if (tip) x.dataset.tip = tip; mt.before(x); }; // just before what they wrote
+  if (m.hl) { d.classList.add('hlm'); tag('Highlighted', 'sptag', 'Highlighted with channel points'); }
+  else if (m.reward) { d.classList.add('rwm'); tag('Channel points', 'sptag', 'Sent with a channel points reward'); }
+  if (m.bits) { d.classList.add('bitm'); tag(m.bits.toLocaleString() + (m.bits === 1 ? ' bit' : ' bits'), 'bittag', 'Cheered with Bits'); }
+  if (m.fx) { d.classList.add('fxm', 'fx-' + String(m.fx).replace(/[^a-z0-9-]/gi, '')); tag('Message effect', 'sptag', 'Power-up: a message effect bought with Bits'); }
+  if (m.giant) { const ems = d.querySelectorAll('.mt .emote'); const last = ems[ems.length - 1]; if (last) last.classList.add('giant'); d.classList.add('giantm'); tag('Giant emote', 'sptag', 'Power-up: an emote made giant with Bits'); }
+}
+function tokens(c, text, emotesTag, own, gifsTag, bits) {
   const cps = Array.from(text), ranges = [], out = []; let pos = 0;
   if (gifsTag && S.settings.gifs !== false) parseGifs(gifsTag).forEach((g) => ranges.push({ s: g.s, e: g.e, gif: g }));
   if (emotesTag) emotesTag.split('/').forEach((e) => { const [id, locs] = e.split(':'); if (locs) locs.split(',').forEach((l) => { const [s, en] = l.split('-').map(Number); ranges.push({ s, e: en, id }); }); });
   ranges.sort((a, b) => a.s - b.s);
   const find = (w) => { const em = c.emotes.get(w) || S.global.get(w); if (em && provOn(em.src)) return em; return own ? c.twitchMap.get(w) || S.myMap.get(w) || S.twitchGlobalMap.get(w) : null; };
   // Whitespace is kept as its own token, so spaces around words, links and emotes are never lost
-  const pushText = (str) => str.split(/(\s+)/).forEach((w) => { if (!w) return; const em = /^\s+$/.test(w) ? null : find(w); out.push(em ? { t: 'e', url: em.url, fb: em.fb, name: w, zw: em.zw && S.settings.zeroWidth } : { t: 'w', w }); });
-  ranges.forEach((r) => { if (r.s < pos) return; if (r.s > pos) pushText(cps.slice(pos, r.s).join('')); out.push(r.gif ? { t: 'g', url: r.gif.url, id: r.gif.id, alt: cps.slice(r.s, r.e + 1).join('') } : { t: 'e', ...twEmote(r.id), name: cps.slice(r.s, r.e + 1).join('') }); pos = r.e + 1; });
+  const pushText = (str) => str.split(/(\s+)/).forEach((w) => { if (!w) return; const ch = bits && cheerTok(c, w); if (ch) return out.push(ch); const em = /^\s+$/.test(w) ? null : find(w); out.push(em ? { t: 'e', url: em.url, fb: em.fb, name: w, zw: em.zw && S.settings.zeroWidth, src: em.src, id: em.id, by: em.by } : { t: 'w', w }); });
+  ranges.forEach((r) => { if (r.s < pos) return; if (r.s > pos) pushText(cps.slice(pos, r.s).join('')); out.push(r.gif ? { t: 'g', url: r.gif.url, id: r.gif.id, alt: cps.slice(r.s, r.e + 1).join('') } : { t: 'e', ...twEmote(r.id), src: 'twitch', id: r.id, name: cps.slice(r.s, r.e + 1).join('') }); pos = r.e + 1; });
   if (pos < cps.length) pushText(cps.slice(pos).join(''));
   return out;
 }
@@ -379,7 +450,8 @@ const LINK_RX = /^((?:https?:\/\/|www\.)[^\s]+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:c
 function bodyHtml(toks) {
   return toks.map((t) => {
     if (t.t === 'g') return gifHtml(t);
-    if (t.t === 'e') return `<img class="emote${t.zw ? ' zw' : ''}" src="${esc(stillOn() ? stillUrl(t.url) : t.url)}" data-fb="${esc(t.fb || '')}" alt="${esc(t.name)}" data-tip="${esc(t.name)}" referrerpolicy="no-referrer">`;
+    if (t.t === 'c') return `<span class="cheer" style="--cc:${esc(t.color)}" data-tip="${esc(t.name)}"><img class="emote" src="${esc(stillOn() ? stillUrl(t.url) : t.url)}" alt="${esc(t.name)}" referrerpolicy="no-referrer"><b>${t.n.toLocaleString()}</b></span>`;
+    if (t.t === 'e') return `<img class="emote${t.zw ? ' zw' : ''}" src="${esc(stillOn() ? stillUrl(t.url) : t.url)}" data-fb="${esc(t.fb || '')}" alt="${esc(t.name)}" data-em="${esc([t.src || '', t.id || '', t.by || ''].join('|'))}" referrerpolicy="no-referrer">`;
     const w = t.w, tail = (w.match(/[.,!?;:)\]]+$/) || [''])[0], core = tail ? w.slice(0, -tail.length) : w;
     if (blHit(w)) return `<span class="bl" tabindex="0" data-tip="Hidden by your blacklist. Hover to reveal">${esc(w)}</span>`;
     if (core.length > 3 && LINK_RX.test(core)) { const href = /^https?:/i.test(core) ? core : 'https://' + core; return `<a class="lnk" href="#" data-url="${esc(href)}" data-tip="${esc(href)}">${esc(core)}</a>${esc(tail)}`; }
@@ -388,8 +460,20 @@ function bodyHtml(toks) {
   }).join('');
 }
 // If an emote image fails, walk through its backup URLs, then fall back to the emote's name
+// Twitch's old robot smileys like :) and :( are smaller than other emotes. Twitch shows them at their own size, so do the same instead of stretching them to full emote height
+// A GIF is taller than a line once it loads: keep a chat that was at the bottom pinned to the bottom so the newest GIF isn't cut in half
+document.addEventListener('load', (e) => {
+  const i = e.target; if (!(i instanceof HTMLImageElement) || !(i.classList.contains('gifimg') || i.classList.contains('emote'))) return;
+  const row = i.closest('.msg, .notice'); if (!row) return; row.style.containIntrinsicSize = ''; for (const c of S.chats.values()) if (c.list && c.list.contains(row)) { if (c.stick !== false) stickScroll(c); break; }
+}, true);
+document.addEventListener('load', (e) => {
+  const i = e.target; if (!(i instanceof HTMLImageElement) || !i.classList.contains('emote') || !/static-cdn\.jtvnw\.net\/emoticons\//.test(i.src)) return;
+  const scale = parseFloat(i.src.split('/').pop()) || 1, full = 28 * scale, h = i.naturalHeight;
+  if (h && h < full * 0.9) i.style.height = `calc(var(--emh, 1.9em) * ${Math.round(h / full * 100) / 100})`;
+}, true);
 document.addEventListener('error', (e) => {
-  const i = e.target; if (!i || i.tagName !== 'IMG' || !i.classList.contains('emote')) return;
+  const i = e.target; if (i && i.tagName === 'IMG' && i.classList.contains('emc-i')) { if (i.dataset.fb && i.src !== i.dataset.fb) i.src = i.dataset.fb; return; } // the hover card's big picture: fall back to the chat-size one
+  if (!i || i.tagName !== 'IMG' || !i.classList.contains('emote')) return;
   const left = (i.dataset.fb || '').split(' ').filter(Boolean);
   try { const h = new URL(i.src).host; S.imgFail[h] = (S.imgFail[h] || 0) + 1; } catch (x) {}
   if (left.length) { i.dataset.fb = left.slice(1).join(' '); i.src = left[0]; } else i.replaceWith(el('span', 'emote-missing', esc(i.alt)));
@@ -409,13 +493,12 @@ async function ban(c, uid, login, duration, reason, text, quiet) {
   const data = { user_id: uid }; if (duration) data.duration = duration; if (reason) data.reason = reason;
   const r = await helix('moderation/bans', { method: 'POST', query: mq(c), body: { data } }); if (!ok(r)) banBusy.delete(bk); else banBusy.set(bk, Date.now()); if (banBusy.size > 200) banBusy.clear();
   if (!ok(r)) { modFail(c, r, duration ? 'time out' : 'ban', () => ban(c, uid, login, duration, reason, text, quiet)); return false; }
-  markMine(c, login); noteTimeout(c, login, duration ? duration * 1000 : 0); const key = duration ? 'timeouts' : 'bans'; c.stat[key]++; renderStats(); learn(c, text); actionBurst(c);
+  markMine(c, login); noteTimeout(c, login, duration ? duration * 1000 : 0); if (window.Usage) Usage.count('banTo'); const key = duration ? 'timeouts' : 'bans'; c.stat[key]++; renderStats(); learn(c, text); actionBurst(c);
   const who = dn(c, login), what = duration ? `timed out ${who} for ${fmtDurLong(duration)}` : `banned ${who}`;
   logLine(c, `* ${S.me.login} ${what}${reason ? ' (' + reason + ')' : ''}`); logAct(c, duration ? 'timeout' : 'ban', `You ${what}${reason ? ' (' + reason + ')' : ''}`, undefined, login);
-  if (!duration && !reason && S.settings.banNote !== false && !quiet) askBanNote(c, login);
   if (quiet) return true;
   const guest = c.sharedUsers && c.sharedUsers.has(String(login).toLowerCase()) ? '. They came in through shared chat, so Twitch only applies this while the shared chat lasts.' : '';
-  toast((duration ? `Timed out ${who} for ${fmtDurLong(duration)}` : `Banned ${who}`) + guest, { ms: guest ? 8000 : 6000, action: { label: 'Undo', fn: async () => { if (await unban(c, uid, login, false, !!duration)) { c.stat[key]--; renderStats(); } } } }); return true;
+  toast((duration ? `Timed out ${who} for ${fmtDurLong(duration)}` : `Banned ${who}`) + guest, { ms: guest ? 8000 : 6000, action: { label: 'Undo', fn: async () => { if (await unban(c, uid, login, false, !!duration)) { if (window.Usage) Usage.count('undoBan'); c.stat[key]--; renderStats(); } } } }); return true;
 }
 // Twitch ends bans and timeouts with the same call. If the person is (as far as YappyChat saw) timed out rather than banned, it is worded as removing the timeout.
 function timedOut(c, login) { const t = c.toUntil && c.toUntil.get(String(login).toLowerCase()); return !!t && t > Date.now(); }
@@ -474,6 +557,18 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault(); pickTimeout(c, msg.dataset.uid, msg.dataset.user, msgText(msg), b);
 }, true);
 
+// Right-click a message: Translate (opens Google Translate in your browser with the message, or just the part you selected) and Copy
+document.addEventListener('contextmenu', (e) => {
+  const mt = e.target.closest && e.target.closest('.msg .mt, .uc-m .tx, .whb'); if (!mt || e.target.closest('a, button, input, textarea')) return;
+  const sel = String(getSelection() || '').trim(), msg = mt.closest('.msg'), text = sel || (msg ? msgText(msg) : mt.textContent.trim()); if (!text) return;
+  e.preventDefault(); const x = e.clientX, y = e.clientY;
+  const n = el('div', 'stack moremenu msgmenu', `<button class="btn macroi" data-t="tr"><b>${ico('globe', 16)} Translate${sel ? ' selection' : ''}</b></button><button class="btn macroi" data-t="cp"><b>${ico('copy', 16)} Copy${sel ? ' selection' : ' message'}</b></button>`);
+  popover(n, { getBoundingClientRect: () => ({ right: x + n.offsetWidth, top: y, bottom: y }) });
+  n.onclick = (ev) => { const b = ev.target.closest('[data-t]'); if (!b) return; closePop();
+    if (b.dataset.t === 'cp') return navigator.clipboard.writeText(text).then(() => toast('Copied', { ms: 1500 }));
+    const to = (navigator.language || 'en').split('-')[0]; cg.openExternal(`https://translate.google.com/?sl=auto&tl=${encodeURIComponent(to)}&text=${encodeURIComponent(text.slice(0, 2000))}&op=translate`); };
+});
+
 /* ---------- Clicks and hover tools inside a chat ---------- */
 function doMsgAction(c, msg, a, anchor) {
   const id = msg.dataset.id, login = msg.dataset.user, uid = msg.dataset.uid, text = msgText(msg);
@@ -483,7 +578,7 @@ function doMsgAction(c, msg, a, anchor) {
   else if (a === 'tolen') pickTimeout(c, uid, login, text, anchor || msg);
   else if (a === 'ban') { if (!S.settings.confirmBans) ban(c, uid, login, 0, '', text); else ask(`Ban ${login}?`, `In ${c.name}. You can unban them later from their user card.`, 'Ban', true).then((y) => y && ban(c, uid, login, 0, '', text)); }
   else if (a === 'warn') askWarn(c, uid, login, anchor || msg);
-  else if (a === 'copy') { navigator.clipboard.writeText(text).then(() => toast('Message copied', { ms: 1800 })); }
+  else if (a === 'copy') { navigator.clipboard.writeText(text).then(() => { const b = anchor && anchor.closest && anchor.closest('button[data-a=copy]'); if (b && !b._ok) { const was = b.innerHTML; b._ok = 1; b.classList.add('okpop'); b.innerHTML = '<svg class="ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path class="ck" d="M5 12.5l4.5 4.5L19 7.5"/></svg>'; setTimeout(() => { b.innerHTML = was; b.classList.remove('okpop'); b._ok = 0; }, 1300); } else toast('Message copied', { ms: 1800 }); }); }
   else if (a === 'reply') setReply(c, { id, name: msg.querySelector('.name').textContent, text, login, thread: msg.dataset.thread || id });
   else if (a === 'pin') pinMessage(c, id);
   else if (a === 'macro') saveMacroFrom(text);
@@ -541,7 +636,7 @@ document.addEventListener('keydown', (e) => {
 let lastIn = null;
 const paneOnly = () => !!(S.settings.paneInput && S.settings.paneOnly); // every chat has its own box and the bottom bar is hidden
 const inp = () => { const c = cur(); if (lastIn && lastIn.isConnected && ((lastIn.id === 'input' && !paneOnly()) || (c && c.pin === lastIn))) return lastIn; return (S.settings.paneInput && c && c.pin) || $('#input'); };
-function setReply(c, r) { S.replyTo = r ? { ...r, c: c && c.login } : null; $('#replybar').classList.add('hidden'); S.chats.forEach((x) => x.pbar && x.pbar.classList.add('hidden')); if (!r || !c) return; const bar = S.settings.paneInput && c.pbar ? c.pbar : $('#replybar'); bar.classList.remove('hidden'); bar.innerHTML = `${ico('reply', 14)} <span>Replying to <b>${esc(r.name)}</b>: ${esc(r.text.slice(0, 90))}</span><button class="icon" id="reply-x" data-tip="Cancel reply">${ico('x', 14)}</button>`; $('#reply-x', bar).onclick = () => setReply(c, null); $('#input').focus(); }
+function setReply(c, r) { S.replyTo = r ? { ...r, c: c && c.login } : null; $('#replybar').classList.add('hidden'); S.chats.forEach((x) => x.pbar && x.pbar.classList.add('hidden')); if (!r || !c) return; const bar = S.settings.paneInput && c.pbar ? c.pbar : $('#replybar'); bar.classList.remove('hidden'); bar.innerHTML = `${ico('reply', 14)} <span>Replying to <b>${unm(r.name, r.login)}</b>: ${esc(r.text.slice(0, 90))}</span><button class="icon" id="reply-x" data-tip="Cancel reply">${ico('x', 14)}</button>`; $('#reply-x', bar).onclick = () => setReply(c, null); $('#input').focus(); }
 // Up / Down in the message box walks back through the last 10 things you sent. Kept in memory for this session only: never saved to disk or settings.
 S.sent = []; let sentPos = -1, sentDraft = '';
 function rememberSent(text) { if (S.sent[S.sent.length - 1] !== text) S.sent.push(text); if (S.sent.length > 10) S.sent.shift(); sentPos = -1; sentDraft = ''; }
@@ -551,11 +646,15 @@ function sentNav(dir) {
   else { sentPos += dir; if (sentPos < 0) sentPos = 0; if (sentPos >= S.sent.length) { sentPos = -1; el0.value = sentDraft; el0.setSelectionRange(el0.value.length, el0.value.length); return true; } }
   el0.value = S.sent[sentPos]; el0.setSelectionRange(el0.value.length, el0.value.length); return true;
 }
+// Nicknames you've set that start with what you typed: shown by nickname, written into the box as their real name
+function nickItems(lw) { const n = S.settings.nicks || {}; return lw ? Object.values(n).filter((x) => x.nick && x.nick.toLowerCase().startsWith(lw)).slice(0, 4).map((x) => { const at = atName(x.name, x.login); return { text: '@' + at, label: `${x.nick} (${at})` }; }) : []; }
+/* A chatter suggestion: inserts the name you can @, and shows non-English names with it in brackets */
+const userItem = (l, u, sub) => { const at = atName(u.name, l), nm = u.name || l; return { text: '@' + at, label: nm.toLowerCase() === at.toLowerCase() ? nm : `${nm} (${at})`, sub }; };
 async function send() {
   const c = cur(), box0 = inp(), text = box0.value.trim(); if (!c || !text) return; box0.value = ''; rememberSent(text);
   if (text[0] === '/' && !/^\/me\s/i.test(text)) return command(c, text);
   const rp = S.replyTo && S.replyTo.c === c.login ? S.replyTo : null;
-  const ok = postChat(c, text, rp); if (ok && rp) setReply(c, null);
+  const ok = postChat(c, nicksToNames(text, c), rp); if (ok && rp) setReply(c, null);
   if (!ok && !box0.value) box0.value = text; // not sent: keep what they typed
 }
 // Sends a chat message (optionally as a reply) and shows it straight away.
@@ -658,14 +757,15 @@ function updateAC(force) {
   if (!c || !m || m[1].length < (force === true ? 1 : 2)) { S.ac = null; return box.classList.add('hidden'); }
   const w = m[1], lw = w.toLowerCase(); let items = [];
   if (w[0] === ';') items = (S.settings.macros || []).filter((m) => m.n && m.t && (`;${m.n}`).toLowerCase().includes(lw)).map((m) => ({ text: m.t, label: ';' + m.n, sub: m.t.slice(0, 50) }));
-  else if (w[0] === '@') items = [...c.users.values()].map((u) => ({ text: '@' + u.name })).filter((x) => x.text.toLowerCase().startsWith(lw));
+  else if (w[0] === '@') { const q = lw.slice(1); items = [...nickItems(q), ...[...c.users.entries()].filter(([l, u]) => l.startsWith(q) || (u.name || '').toLowerCase().startsWith(q)).map(([l, u]) => userItem(l, u))].slice(0, 10); }
   else {
     const seen = new Set();
     // Includes the Twitch emotes you can actually use anywhere (subscriber emotes from other channels too), but not this channel's locked ones
     const usableHere = (v) => v.src !== 'twitch' || !v.id || !c.usable || c.usable.has(v.id) || S.myIds.has(v.id);
     // Chatter names first (people who have spoken here, most recent first), then emotes; picking a name writes it as an @mention
     const lastTs = (u) => (u.msgs && u.msgs.length ? u.msgs[u.msgs.length - 1].ts : 0);
-    [...c.users.entries()].filter(([l, u]) => l.startsWith(lw) || (u.name || '').toLowerCase().startsWith(lw)).sort((a, b) => lastTs(b[1]) - lastTs(a[1])).slice(0, 4).forEach(([l, u]) => items.push({ text: '@' + (u.name || l), label: u.name || l, sub: 'chatter' }));
+    [...c.users.entries()].filter(([l, u]) => l.startsWith(lw) || (u.name || '').toLowerCase().startsWith(lw)).sort((a, b) => lastTs(b[1]) - lastTs(a[1])).slice(0, 4).forEach(([l, u]) => items.push(userItem(l, u, 'chatter')));
+    items = [...nickItems(lw), ...items].slice(0, 5);
     const nNames = items.length, emo = [];
     if (S.settings.acEmotes !== false || force === true) [c.emotes, S.global, c.twitchMap, S.twitchGlobalMap, S.myMap].filter(Boolean).forEach((mp) => mp.forEach((v, k) => { if (!seen.has(k) && provOn(v.src) && usableHere(v) && k.toLowerCase().includes(lw)) { seen.add(k); emo.push({ text: k, url: v.url, fb: v.fb }); } }));
     emo.sort((a, b) => b.text.toLowerCase().startsWith(lw) - a.text.toLowerCase().startsWith(lw) || a.text.length - b.text.length);
@@ -718,14 +818,18 @@ async function userHistory(c, login, u, card) {
   };
   // Shown at once with what this session saw, then again as the saved logs and Twitch's recent messages arrive (each can take a moment)
   let pending = 2, first = true;
-  const draw = () => {
+  const draw = () => { try { drawNow(); } catch (e) { pending = 0; box.querySelectorAll('.uc-loading').forEach((x) => x.remove()); try { cg.reportError(e); } catch (x) {} } };
+  setTimeout(() => { if (pending) { pending = 0; draw(); } }, 9000); // never leave "Loading older messages" up: whatever has arrived by then is shown
+  const drawNow = () => {
   if (!card.isConnected) return; const at = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const total = rows.filter((r) => !r.ev).length; // the moderation on this person goes in between their messages, at the time it happened
-  const evRows = []; (card._evs || []).filter((x) => /^(ban|unban|timeout|untimeout|warn|delete)$/.test(x.kind)).reverse().forEach((x) => evRows.push({ ev: x, d: ymd(x.ts), t: new Date(x.ts).toTimeString().slice(0, 8), ms: x.ts, srcs: new Set() }));
+  const evRows = []; (card._evs || []).filter((x) => /^(ban|unban|timeout|untimeout|warn)$/.test(x.kind)).reverse().forEach((x) => evRows.push({ ev: x, d: ymd(x.ts), t: new Date(x.ts).toTimeString().slice(0, 8), ms: x.ts, srcs: new Set() }));
   const all = [...rows, ...evRows].sort((a, b) => (a.d + a.t).localeCompare(b.d + b.t) || (a.ms || 0) - (b.ms || 0)); // oldest first, newest at the bottom, like Twitch
   const shown = all.slice(-400); let last = '', html = '';
+  // A message that was deleted (or removed by a ban or timeout) shows in italics instead of a separate "deleted a message" line
+  const delTexts = new Set((card._evs || []).filter((x) => x.kind === 'delete' && x.msg).map((x) => x.msg)), gone = (r) => { const m = r.i != null && u.msgs[r.i], n = m && m.id && c.msgs.get(m.id); return !!((n && n.classList.contains('gone')) || (m && m.del) || delTexts.has(r.text)); };
   const nm = esc(u.name || login), today = ymd(Date.now());
-  shown.forEach((r) => { if (r.d !== last) { last = r.d; html += `<div class="uc-day"><span>${r.d === today ? 'Today' : new Date(r.d + 'T00:00').toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}</span></div>`; } if (r.ev) { const x = r.ev; html += `<div class="uc-m uc-evr k-${esc(x.kind)}"><span class="t">${r.ms ? tmFmt(r.ms) : esc(r.t)}</span><span class="tx">${ico(KIND_ICON[x.kind] || 'file', 12)} ${x.by && !String(x.text).startsWith(x.by + ' ') ? `<b>${esc(x.by)}</b> ` : ''}${esc(x.text)}</span></div>`; return; } html += `<div class="uc-m${r.am ? ' uc-am' : ''}"${r.i != null ? ` data-i="${r.i}"` : ''}><span class="t">${r.ms ? tmFmt(r.ms) : esc(r.t)}</span><span class="tx">${bodyHtml(tokens(c, r.text, r.emo, true, r.gifs))}${r.am ? ` <span class="uc-amtag">${esc(r.am)}</span>` : ''}</span>${r.i != null && !r.am && u.msgs[r.i].id && (isMod(c) || isOwner(c)) ? `<button class="x" data-tip="Delete this message">${ico('trash', 13)}</button>` : ''}</div>`; });
+  shown.forEach((r) => { if (r.d !== last) { last = r.d; html += `<div class="uc-day"><span>${r.d === today ? 'Today' : new Date(r.d + 'T00:00').toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}</span></div>`; } if (r.ev) { const x = r.ev; html += `<div class="uc-m uc-evr k-${esc(x.kind)}"><span class="t">${r.ms ? tmFmt(r.ms) : esc(r.t)}</span><span class="tx">${ico(KIND_ICON[x.kind] || 'file', 12)} ${x.by && !String(x.text).startsWith(x.by + ' ') ? `<b>${esc(x.by)}</b> ` : ''}${esc(x.text)}</span></div>`; return; } const rm = gone(r); html += `<div class="uc-m${r.am ? ' uc-am' : ''}${rm ? ' del' : ''}"${r.i != null ? ` data-i="${r.i}"` : ''}${rm ? ' data-tip="Deleted"' : ''}><span class="t">${r.ms ? tmFmt(r.ms) : esc(r.t)}</span><span class="tx">${bodyHtml(tokens(c, r.text, r.emo, true, r.gifs))}${r.am ? ` <span class="uc-amtag">${esc(r.am)}</span>` : ''}</span>${r.i != null && !r.am && !rm && u.msgs[r.i].id && (isMod(c) || isOwner(c)) ? `<button class="x" data-tip="Delete this message">${ico('trash', 13)}</button>` : ''}</div>`; });
   ucCnt($('#ut-m', card), total >= 400 ? '400+' : String(total));
   box.innerHTML = (html || (pending ? '' : `<div class="faint">No messages found for ${nm} yet. YappyChat builds this from the chat it has seen (saved logs when Save chat logs is on) plus Twitch's recent-messages service, so it can't show everything Twitch itself holds.</div>`)) + (pending ? '<div class="faint uc-loading">Loading older messages…</div>' : '');
   const f = $('#uc-find', card); if (f && f.value) f.dispatchEvent(new Event('input')); // keep a search applied
@@ -752,8 +856,8 @@ async function openCard(c, login, anchor, host) { // host: show the card inside 
   login = login.toLowerCase(); const u = c.users.get(login) || { name: login, msgs: [] };
   const watched = (S.settings.watch || []).includes(login), onList = (S.settings.banList || []).some((b) => b.login === login);
   const tabB = (k, label, cnt) => `<button${k === 'm' ? ' class="on"' : ''} role="tab" data-ut="${k}"><span>${label}</span><b id="ut-${k}">${cnt}</b></button>`;
-  const n = el('div', 'ucard', `<div class="uc-head"><img class="uc-av" alt=""><div class="grow"><div class="uc-nrow"><span class="uc-name">${esc(u.name)}</span><button class="ibtn sm" id="uc-copy" data-tip="Copy name" aria-label="Copy name">${ico('copy', 14)}</button></div><div class="uc-sub" id="uc-sub">Loading…</div><div class="uc-was hidden" id="uc-was"></div></div></div>` +
-    `<div class="uc-acts">${ib('uc-watch', 'eye', watched ? 'Remove from watch list' : 'Add to watch list', watched ? 'on' : '')}${ib('prof', 'profile', 'Open Twitch profile')}${ib('uc-at', 'at', 'Mention in chat')}${login === S.me.login ? '' : ib('uc-wh', 'whisper', 'Whisper')}</div><div class="uc-bio" id="uc-bio"></div>` +
+  const n = el('div', 'ucard', `<div class="uc-head"><img class="uc-av" alt=""><div class="grow"><div class="uc-nrow"><span class="uc-name">${esc(u.name)}</span><span class="uc-real hidden"></span><button class="ibtn sm" id="uc-copy" data-tip="Copy their Twitch name" aria-label="Copy their Twitch name">${ico('copy', 14)}</button><button class="ibtn sm" id="uc-nick" data-tip="Nickname (only you see it)" aria-label="Set a nickname">${ico('pencil', 14)}</button></div><form class="uc-nickf hidden"><input maxlength="25" placeholder="Nickname" aria-label="Nickname" spellcheck="false"><button class="btn sm primary">Save</button></form><div class="uc-sub" id="uc-sub">Loading…</div><div class="uc-was hidden" id="uc-was"></div></div></div>` +
+    `<div class="uc-acts">${ib('uc-watch', 'eye', watched ? 'Remove from watch list' : 'Add to watch list', watched ? 'on' : '')}${ib('prof', 'profile', 'Open Twitch profile')}${(isMod(c) || isOwner(c)) && cg.viewerCard ? ib('uc-tw', 'ext', "Twitch's card, with their full message history") : ''}${ib('uc-at', 'at', 'Mention in chat')}${login === S.me.login ? '' : ib('uc-wh', 'whisper', 'Whisper')}</div><div class="uc-bio" id="uc-bio"></div>` +
     /* moderation: one reason box, the timeouts as one strip, then Ban, Unban and Warn. Rarer tools wait behind More. */
     `<div class="uc-mod"><div class="reasonrow"><input id="reason" aria-label="Reason" placeholder="Reason (optional, needed to warn)" maxlength="500" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="uc-rlist" aria-expanded="false">${ib('uc-wsave', 'bookplus', 'Save this reason to use again')}<div class="ac uc-rlist hidden" id="uc-rlist" role="listbox" aria-label="Rules and saved reasons"></div></div>` +
     `<div class="uc-to" role="group" aria-label="Timeout"><span class="uc-tol">${ico('clock', 14)}</span><button data-d="1" data-tip="Purge: clears their messages with a 1-second timeout">Purge</button>${toLens().map((s) => `<button data-d="${s}" data-tip="Time out for ${fmtDur(s)}">${fmtDur(s)}</button>`).join('')}</div>` +
@@ -762,8 +866,19 @@ async function openCard(c, login, anchor, host) { // host: show the card inside 
     `<div class="uc-tabs" role="tablist">${tabB('m', 'Messages', '…')}${tabB('w', 'Warnings', 0)}${tabB('t', 'Timeouts', 0)}${tabB('b', 'Bans', 0)}${tabB('n', 'Notes', 0)}</div>` +
     `<div class="uc-pane" data-p="m"><input class="uc-find" id="uc-find" type="search" aria-label="Search their messages" placeholder="Search" spellcheck="false" autocomplete="off"><div class="uc-msgs tall" id="uc-hist"><div class="faint">Loading…</div></div></div>` +
     ['w', 't', 'b'].map((k) => `<div class="uc-pane hidden" data-p="${k}"><div class="uc-msgs tall uc-recs" id="uc-r${k}"></div></div>`).join('') +
-    `<div class="uc-pane hidden" data-p="n"><div class="uc-msgs uc-notes" id="uc-nl"></div><div class="uc-nadd"><textarea id="uc-note" aria-label="Add a note" class="sens-i" rows="2" maxlength="1000" placeholder="Add a note about ${esc(u.name)}"></textarea><button class="btn sm primary" id="uc-nsave" data-tip="Add note (Ctrl+Enter)">Add</button></div><div class="faint">Only you can see notes. They are saved on this computer.</div></div>` +
+    `<div class="uc-pane hidden" data-p="n"><div class="uc-msgs uc-notes" id="uc-nl"></div>${tnTeam(c) ? `<div class="seg uc-share" role="group" aria-label="Who can see this note"><button type="button" data-share="0" class="on">Only me</button><button type="button" data-share="1">Mod team</button></div>` : ''}<div class="uc-nadd"><textarea id="uc-note" aria-label="Add a note" class="sens-i" rows="2" maxlength="1000" placeholder="Add a note about ${esc(u.name)}"></textarea><button class="btn sm primary" id="uc-nsave" data-tip="Add note (Ctrl+Enter)">Add</button></div><div class="faint" id="uc-nfoot">Only you can see notes. They are saved on this computer.</div></div>` +
     `<div class="faint uc-recnote hidden">What YappyChat saw in ${esc(c.name)} while it was open. Twitch does not give apps the full history.</div>`);
+  /* Nickname: shown instead of their name in chat and here, with their Twitch name beside it. Empty removes it. */
+  n._uid = u.id; n._real = u.name;
+  const paintNick = () => { const nk = nickOf(n._uid), nm = $('.uc-name', n), rl = $('.uc-real', n), at = atName(n._real, login), shown = nk || n._real; nm.textContent = shown; rl.textContent = at; rl.classList.toggle('hidden', shown.toLowerCase() === at.toLowerCase()); };
+  paintNick();
+  $('.uc-nickf', n).onsubmit = (e) => {
+    e.preventDefault(); const i = $('.uc-nickf input', n), v = i.value.trim(); if (!n._uid) return err('Twitch has not told YappyChat who this is yet. Try again in a moment.');
+    if (v && !NICK_RE.test(v)) return err('A nickname can use letters, numbers and _ only, so you can @ it.');
+    const all = { ...(S.settings.nicks || {}) }; if (v) all[n._uid] = { nick: v, login, name: n._real }; else delete all[n._uid];
+    saveSettings({ nicks: all }); if (v && window.Usage) Usage.count('nickname'); $('.uc-nickf', n).classList.add('hidden'); paintNick(); S.chats.forEach((ch) => ch.list && ch.list.querySelectorAll(`.msg[data-user="${login}"] .name`).forEach((x) => { x.innerHTML = nameHtml(n._real, login, v); }));
+    toast(v ? `${n._real} is "${v}" for you. Typing @${v} sends @${atName(n._real, login)}.` : 'Nickname removed.', { ms: 3500 });
+  };
   const canMod = !S.settings.notMod && (isMod(c) || isOwner(c)); n.classList.toggle('uc-nomod', !canMod); // a viewer, or a channel you don't moderate: no mod buttons or mod records
   if (host) { host.innerHTML = ''; host.append(n); } else popover(n, anchor, { vcenter: true });
   // Their record in this channel (kept on this computer): warnings, timeouts and bans each have a tab with a count, like Twitch's own mod view
@@ -772,17 +887,34 @@ async function openCard(c, login, anchor, host) { // host: show the card inside 
   const REC = { w: ['warn'], t: ['timeout', 'untimeout'], b: ['ban', 'unban', 'unbanreq'] }, COUNT = { w: 'warn', t: 'timeout', b: 'ban' }, EMPTY = { w: 'No warnings', t: 'No timeouts', b: 'No bans' };
   const who = (x) => (x.by && !String(x.text).startsWith(x.by + ' ') ? `<b>${esc(x.by)}</b> ` : ''), recRow = (x) => `<div class="uc-rec k-${esc(x.kind)}"><div class="uc-rh">${ico(KIND_ICON[x.kind] || 'file', 13)}<span class="tx">${who(x)}${esc(x.text)}</span><span class="t">${tm(x.ts)}</span></div>${x.msg ? `<div class="uc-rq">${esc(x.msg)}</div>` : ''}</div>`;
   Object.keys(REC).forEach((k) => { const l = evs.filter((x) => REC[k].includes(x.kind)); ucCnt($('#ut-' + k, n), String(l.filter((x) => x.kind === COUNT[k]).length)); $('#uc-r' + k, n).innerHTML = l.map(recRow).join('') || `<div class="uc-sub uc-none">${EMPTY[k]} recorded for ${esc(u.name)} in ${esc(c.name)}.</div>`; });
-  const drawNotes = () => { const l = noteList(login); ucCnt($('#ut-n', n), String(l.length)); $('#uc-nl', n).innerHTML = l.map((x, i) => `<div class="uc-note"><div class="uc-rh"><span class="t">${tm(x.ts)}</span><button class="x" data-nx="${i}" data-tip="Delete this note" aria-label="Delete note">${ico('trash', 13)}</button></div><div class="uc-nt">${esc(x.text)}</div></div>`).join('') || `<div class="uc-sub uc-none">No notes yet.</div>`; };
-  drawNotes(); n._evs = evs;
+  const shareOn = () => !!n.querySelector('.uc-share [data-share="1"].on');
+  const drawNotes = () => {
+    const l = noteList(login), sh = tnNotes(c, n._uid || u.id); ucCnt($('#ut-n', n), String(l.length + sh.length));
+    const mine = (x, i) => `<div class="uc-note"><div class="uc-rh"><span class="t">${tm(x.ts)}</span><button class="x" data-nx="${i}" data-tip="Delete this note" aria-label="Delete note">${ico('trash', 13)}</button></div><div class="uc-nt">${esc(x.text)}</div></div>`;
+    const team = (x) => `<div class="uc-note shared"><div class="uc-rh"><span class="uc-ntag">Mod team</span><span class="tx faint">${esc(x.by)}</span><span class="t">${tm(x.ts)}</span>${x.mine || isOwner(c) ? `<button class="x" data-tn="${x.id}" data-tip="Delete this note for the whole team" aria-label="Delete shared note">${ico('trash', 13)}</button>` : ''}</div><div class="uc-nt">${esc(x.text)}</div></div>`;
+    $('#uc-nl', n).innerHTML = sh.map(team).join('') + l.map(mine).join('') || `<div class="uc-sub uc-none">No notes yet.</div>`;
+  };
+  drawNotes(); n._evs = evs; if (tnTeam(c)) tnLoad(c, 20000).then((fresh) => { if (fresh && n.isConnected) drawNotes(); });
   { const f = $('#uc-find', n); f.oninput = () => { const q = f.value.trim().toLowerCase(), box = $('#uc-hist', n); let shown = 0; box.querySelectorAll('.uc-m').forEach((r) => { const hit = !q || r.textContent.toLowerCase().includes(q); r.classList.toggle('hidden', !hit); if (hit) shown++; }); let nf = $('.uc-nf', box); if (q && !shown) { if (!nf) box.append(el('div', 'faint uc-nf', 'No messages with that word.')); } else if (nf) nf.remove(); }; }
   userHistory(c, login, u, n); // older messages from the saved logs and Twitch's recent messages, so the card shows more than this session
   let uid = u.id, t0 = 0;
   if (u.id) showPastNames(n, u.id, c, u);
-  const noteAdd = () => { const t = $('#uc-note', n), v = t.value.trim(); if (!v) return; addNote(login, v); t.value = ''; drawNotes(); };
+  const noteAdd = async () => {
+    const t = $('#uc-note', n), v = t.value.trim(); if (!v) return;
+    if (!shareOn()) { addNote(login, v); t.value = ''; return drawNotes(); }
+    const id = n._uid || u.id; if (!id) return toast('Still looking this person up. Try again in a moment.');
+    const go = async (again) => {
+      const r = await tnCall('POST', '/api/team-notes', { channel: c.id, user: String(id), login, text: v });
+      if (r && r.status === 200 && r.json && r.json.note) { const tn = c.tn || (c.tn = { notes: {}, at: Date.now(), state: 'ok' }); (tn.notes[id] = tn.notes[id] || []).push(r.json.note); t.value = ''; return drawNotes(); }
+      if (r && r.status === 403 && r.json && r.json.error === 'scope' && !again) return askScope('user:read:moderated_channels', () => go(true)); // asks Twitch which channels you moderate, so the server can check
+      err(r && r.json && r.json.error === 'scope' ? "Twitch didn't confirm that you moderate here. Log out and back in, then try once more." : (r && r.json && r.json.error) || "Couldn't reach YappyChat. Your note was not saved.");
+    };
+    await go(false);
+  };
   $('#uc-note', n).onkeydown = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); noteAdd(); } };
   const r = await helix('users', { query: { login } }), info = r.json && r.json.data && r.json.data[0];
   if (info) {
-    uid = info.id; $('.uc-av', n).src = info.profile_image_url; $('.uc-name', n).textContent = info.display_name; $('#uc-bio', n).textContent = info.description || '';
+    uid = info.id; n._uid = uid; drawNotes(); n._real = info.display_name; $('.uc-av', n).src = info.profile_image_url; paintNick(); $('#uc-bio', n).textContent = info.description || '';
     const sb = $('#uc-sub', n); sb.innerHTML = `<span data-tip="Created ${new Date(info.created_at).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })}">Account ${ago(info.created_at)}</span>`;
     if (!u.id) showPastNames(n, uid, c, u);
     const f = modKnown(c) ? await helix('channels/followers', { query: { broadcaster_id: c.id, user_id: uid } }) : { status: 0 };
@@ -818,11 +950,15 @@ async function openCard(c, login, anchor, host) { // host: show the card inside 
     if (b.id === 'uc-wsave') { const r = reason(); if (!r) return err('Type the reason first, then save it.'); if (savedWarns().includes(r)) return toast('Already saved', { ms: 1500 }); if (savedWarns().length >= 20) return toast('You can save 20 reasons. Remove one in Settings > Moderation.', { ms: 3000 }); saveSettings({ warnSaved: [...savedWarns(), r] }); chips(); return toast('Reason saved. Edit them in Settings > Moderation.', { ms: 2500 }); }
     if (b.id === 'uc-nsave') return noteAdd();
     if (b.id === 'uc-more') { const r = $('#uc-morerow', n), open = r.classList.toggle('hidden'); b.classList.toggle('on', !open); return; }
+    if (b.dataset.share !== undefined) { n.querySelectorAll('.uc-share button').forEach((x) => x.classList.toggle('on', x === b)); $('#uc-nfoot', n).textContent = b.dataset.share === '1' ? `Every moderator of ${c.name} can see this note. It is saved on YappyChat's server, not on this computer.` : 'Only you can see notes. They are saved on this computer.'; return; }
+    if (b.dataset.tn !== undefined) { const r = await tnCall('POST', '/api/team-notes/delete', { channel: c.id, id: +b.dataset.tn }); if (r && (r.status === 200 || r.status === 404)) { const t = c.tn, id = n._uid || u.id; if (t && t.notes[id]) { t.notes[id] = t.notes[id].filter((x) => String(x.id) !== b.dataset.tn); if (!t.notes[id].length) delete t.notes[id]; } return drawNotes(); } return err((r && r.json && r.json.error) || "Couldn't reach YappyChat. The note was not deleted."); }
     if (b.dataset.nx !== undefined) { saveNotes(login, noteList(login).filter((x, i) => i !== +b.dataset.nx)); return drawNotes(); }
     if (b.dataset.ut) { n.querySelectorAll('[data-ut]').forEach((x) => x.classList.toggle('on', x === b)); n.querySelectorAll('.uc-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.p !== b.dataset.ut)); $('.uc-recnote', n).classList.toggle('hidden', !'wtb'.includes(b.dataset.ut)); const hb = $('#uc-hist', n); if (b.dataset.ut === 'm' && hb) hb.scrollTop = hb.scrollHeight; return; }
-    if (b.classList.contains('x')) { const row = b.closest('.uc-m'), m = u.msgs[+row.dataset.i]; del(c, m.id, m.text, login); row.classList.add('gone'); b.remove(); return; }
-    if (b.id === 'uc-copy') { const nm = $('.uc-name', n).textContent; navigator.clipboard.writeText(nm).then(() => toast(`Copied ${nm}`, { ms: 1500 })); return; }
+    if (b.classList.contains('x')) { const row = b.closest('.uc-m'), m = u.msgs[+row.dataset.i]; del(c, m.id, m.text, login); m.del = true; row.classList.add('del'); row.dataset.tip = 'Deleted'; b.remove(); return; }
+    if (b.id === 'uc-nick') { const f = $('.uc-nickf', n), i = $('input', f); f.classList.toggle('hidden'); i.value = nickOf(n._uid); i.focus(); i.select(); return; }
+    if (b.id === 'uc-copy') { const nm = atName(n._real || u.name, login); navigator.clipboard.writeText(nm).then(() => toast(`Copied ${nm}`, { ms: 1500 })); return; }
     if (b.id === 'prof') return openLink('https://www.twitch.tv/' + login);
+    if (b.id === 'uc-tw') return cg.viewerCard(c.login, login); // Twitch's own mod card in a small window: it has their whole history in this channel, which apps can't read
     if (b.id === 'uc-at') { closePop(); const i = inp(); i.value += (i.value && !/\s$/.test(i.value) ? ' ' : '') + '@' + login + ' '; return i.focus(); }
     if (b.id === 'uc-bl') { if (!uid) uid = await idOf(login); const has = (S.settings.banList || []).some((x) => x.login === login); if (has) saveSettings({ banList: S.settings.banList.filter((x) => x.login !== login) }); else addToBanList(login, uid, reason()); b.classList.toggle('on', !has); $('span', b).textContent = has ? 'Add to Ban on sight' : 'On your Ban on sight list'; return toast(has ? `${login} removed from Ban on sight` : `${login} added to Ban on sight`, { ms: 2200 }); }
     if (b.id === 'uc-watch') { const w = new Set(S.settings.watch || []); w.has(login) ? w.delete(login) : w.add(login); saveSettings({ watch: [...w] }); compileHl(); b.classList.toggle('on', w.has(login)); b.dataset.tip = w.has(login) ? 'Remove from watch list' : 'Add to watch list'; return toast(w.has(login) ? `Watching ${login}. Their messages are highlighted.` : `Stopped watching ${login}`, { ms: 2500 }); }
@@ -849,23 +985,38 @@ document.addEventListener('wheel', (e) => { if (!S.settings.reverseChat || e.ctr
 
 // Subs, gifts, raids, watch streaks, announcements and the like: a card with a coloured bar like Twitch's own chat. Their name stands out, and anything they
 // wrote with it (a resub message, an announcement) sits underneath with its emotes.
-const EV_ICON = { sub: 'star', resub: 'star', subgift: 'gift', submysterygift: 'gift', giftpaidupgrade: 'gift', anongiftpaidupgrade: 'gift', primepaidupgrade: 'star', standardpayforward: 'gift', communitypayforward: 'gift', raid: 'rocket', viewermilestone: 'trophy', announcement: 'mega', bitsbadgetier: 'coin', onetapgiftredeemed: 'gift', charitydonation: 'heart' };
+const EV_ICON = { sub: 'star', resub: 'star', subgift: 'gift', submysterygift: 'gift', giftpaidupgrade: 'gift', anongiftpaidupgrade: 'gift', primepaidupgrade: 'star', standardpayforward: 'gift', communitypayforward: 'gift', raid: 'rocket', bitsbadgetier: 'diamond', charitydonation: 'heart', onetapgiftredeemed: 'gift', viewermilestone: 'trophy', announcement: 'mega', bitsbadgetier: 'coin', onetapgiftredeemed: 'gift', charitydonation: 'heart' };
 const ANN_COL = { BLUE: '#00b5d8', GREEN: '#00d88c', ORANGE: '#ffb31a', PURPLE: '#9147ff' };
 function eventNotice(c, p, sys) {
   const t = p.tags, id = t['msg-id'] || '', name = t['display-name'] || t.login || '', said = (p.trailing || '').trim();
   let head = esc(sys || (id === 'announcement' ? 'Announcement' : ''));
-  if (name && sys.toLowerCase().startsWith(name.toLowerCase())) head = `<b class="ev-n nlk" data-user="${esc((t.login || name).toLowerCase())}">${esc(name)}</b>${esc(sys.slice(name.length))}`; // their name, bold and clickable for the user card
-  if (id === 'announcement') head = `<b class="ev-n nlk" data-user="${esc((t.login || name).toLowerCase())}">${esc(name)}</b> made an announcement`;
+  // Anyone else the notice names (the person a sub was gifted to): a non-English name gets the name you can @ after it
+  const rn = t['msg-param-recipient-display-name'], rl = t['msg-param-recipient-user-name'], rest = (x) => { let h = esc(x); if (rn && rl) { const at = atName(rn, rl); if (at.toLowerCase() !== rn.toLowerCase()) h = h.split(esc(rn)).join(unm(rn, rl)); } return h; };
+  head = sys ? rest(sys) : head;
+  // Some notices come with only a placeholder from Twitch (bitsbadgetier says "bits badge tier notification"): write them out like Twitch does
+  const P = (k) => t['msg-param-' + k] || '', nm = `<b class="ev-n nlk" data-user="${esc((t.login || name).toLowerCase())}">${unm(name, t.login)}</b>`, num = (v) => (+v ? (+v).toLocaleString() : v);
+  const OWN = {
+    bitsbadgetier: () => `${nm} just earned a new ${num(P('threshold'))} Bits badge!`,
+    charitydonation: () => `${nm} donated ${P('donation-amount') ? (+P('donation-amount') / Math.pow(10, +P('donation-exponent') || 0)).toLocaleString(undefined, { style: 'currency', currency: P('donation-currency') || 'USD' }) : ''} to ${esc(P('charity-name') || 'charity')}`,
+    onetapgiftredeemed: () => `${nm} sent a ${esc(P('gift-name') || 'gift')}${P('bits-spent') ? ` (${num(P('bits-spent'))} Bits)` : ''}`,
+    viewermilestone: () => (sys ? '' : `${nm} watched ${num(P('value'))} streams in a row!`),
+    rewardgift: () => (sys ? '' : `${nm}'s cheer shared rewards with the chat!`),
+    primecommunitygiftreceived: () => (sys ? '' : `${nm} gifted a Prime gift: ${esc(P('gift-name'))}`),
+  };
+  const own = OWN[id] && OWN[id](); if (own) head = own;
+  else if (!sys || /^[\w\s-]*notification$/i.test(sys.trim())) head = `${nm} ${esc(({ unraid: 'cancelled the raid', ritual: 'is new here. Say hi!' })[id] || 'has a new notice')}`;
+  if (!own && name && sys.toLowerCase().startsWith(name.toLowerCase())) head = `<b class="ev-n nlk" data-user="${esc((t.login || name).toLowerCase())}">${unm(name, t.login)}</b>${rest(sys.slice(name.length))}`; // their name, bold and clickable for the user card
+  if (id === 'announcement') head = `<b class="ev-n nlk" data-user="${esc((t.login || name).toLowerCase())}">${unm(name, t.login)}</b> made an announcement`;
   const body = said ? `<div class="ev-said">${bodyHtml(tokens(c, said, t.emotes, false, t.gifs || ''))}</div>` : '';
   const n = el('div', 'notice ev ev-' + (id.replace(/[^a-z]/g, '') || 'other'), `<div class="ev-h">${ico(EV_ICON[id] || 'spark', 15)}<span>${head}</span></div>${body}`);
   if (id === 'announcement') n.style.setProperty('--ev', ANN_COL[t['msg-param-color']] || 'var(--accent)');
-  push(c, n); logLine(c, sys + (said ? ' ' + said : ''));
+  push(c, n); logLine(c, n.querySelector('.ev-h span').textContent + (said ? ' ' + said : ''));
 }
 
 // A mention, highlight or watched person: kept in Mentions, with its sound, and counted on the channel's tab when you are not looking at it
 function noteHit(c, m, hit, watched) {
-  if (watched) { S.mentions.unshift({ c: c.login, name: m.name, login: m.login, id: m.id, text: m.text, ts: m.ts, kind: 'watch' }); S.mentions.length = Math.min(S.mentions.length, 200); bump('mentions'); play('watch', c.login); flashMe(`${m.name} in ${c.name}`); }
-  else if (hit) { S.mentions.unshift({ c: c.login, name: m.name, login: m.login, id: m.id, text: m.text, ts: m.ts, kind: 'hl', color: hit.color }); S.mentions.length = Math.min(S.mentions.length, 200); bump('mentions'); if (hit.snd !== false) play('highlight', c.login); flashMe(`Highlight in ${c.name}`); }
+  if (watched) { S.mentions.unshift({ c: c.login, name: m.name, login: m.login, id: m.id, text: m.text, ts: m.ts, kind: 'watch' }); S.mentions.length = Math.min(S.mentions.length, 200); bump('mentions'); play('watch', c.login); flashMe(`${m.name} in ${c.name}`, 'hl'); }
+  else if (hit) { S.mentions.unshift({ c: c.login, name: m.name, login: m.login, id: m.id, text: m.text, ts: m.ts, kind: 'hl', color: hit.color }); S.mentions.length = Math.min(S.mentions.length, 200); bump('mentions'); if (hit.snd !== false) play('highlight', c.login); flashMe(`Highlight in ${c.name}`, hit.mention ? 'mention' : 'hl'); }
   if ((hit || watched) && c.login !== S.active) { c.unreadN = (c.unreadN || 0) + 1; if (!c.unread) { c.unread = true; renderTabs(); } else { const t = document.querySelector(`#tabs .tab[data-login="${c.login}"] .tcount`); if (t) t.textContent = c.unreadN > 99 ? '99+' : c.unreadN; } }
 }
 // A message in a chat you don't have open: only checked for your name, your highlight words and people you watch
@@ -911,11 +1062,11 @@ function openThread(c, id) {
     i.onkeydown = (e) => { if (e.key === 'Escape') { e.stopPropagation(); return closeThread(c); } if (e.key !== 'Enter') return; e.preventDefault(); const text = i.value.trim(); if (!text) return; const t0 = c.threads.get(c.threadBox.dataset.id); if (!t0) return; const last = [...t0.replies].reverse().find((r) => r.id && r.login !== S.me.login) || t0.root; postChat(c, text, { id: last.id || t0.id, name: last.name, text: last.text, login: last.login, thread: t0.id }); i.value = ''; };
   }
   c.threadBox.dataset.id = id; c.threadBox.classList.remove('hidden'); drawThread(c, th);
-  const i = c.threadBox.querySelector('.th-input'), last = [...th.replies].reverse().find((r) => r.login !== S.me.login) || th.root; i.value = last.name ? '@' + last.name + ' ' : ''; i.focus(); i.setSelectionRange(i.value.length, i.value.length);
+  const i = c.threadBox.querySelector('.th-input'), last = [...th.replies].reverse().find((r) => r.login !== S.me.login) || th.root; i.value = last.name ? '@' + atName(last.name, last.login) + ' ' : ''; i.focus(); i.setSelectionRange(i.value.length, i.value.length);
 }
 function closeThread(c) { if (c.threadBox) c.threadBox.classList.add('hidden'); }
 function drawThread(c, th) {
-  const row = (r, cls) => { return `<div class="th-m ${cls}">${S.settings.timestamps ? `<span class="ts">${r.ts ? fmtTs(r.ts, S.settings.tsFormat) : ''}</span> ` : ''}<b class="nlk name th-n" data-user="${esc(r.login)}" style="${r.st || nameStyle(r.color, r.login || r.name || 'x')}">${esc(r.name)}</b>: <span class="mt">${bodyHtml(tokens(c, r.text || '', r.emotes, false, r.gifs || ''))}</span></div>`; };
+  const row = (r, cls) => { return `<div class="th-m ${cls}">${S.settings.timestamps ? `<span class="ts">${r.ts ? fmtTs(r.ts, S.settings.tsFormat) : ''}</span> ` : ''}<b class="nlk name th-n" data-user="${esc(r.login)}" style="${r.st || nameStyle(r.color, r.login || r.name || 'x')}">${unm(r.name, r.login)}</b>: <span class="mt">${bodyHtml(tokens(c, r.text || '', r.emotes, false, r.gifs || ''))}</span></div>`; };
   const list = c.threadBox.querySelector('.th-list');
   list.innerHTML = row(th.root, 'th-root') + th.replies.map((r, i) => row(r, 'th-rep' + (i === th.replies.length - 1 ? ' th-last' : ''))).join('');
   list.scrollTop = list.scrollHeight;
@@ -929,3 +1080,8 @@ async function showPastNames(card, uid, c, u) {
   box.innerHTML = `${ico('history', 13)}<span>Was ${l.map((x) => `<b data-tip="Seen as ${esc(x.login)} until about ${d(x.until)}">${esc(x.login)}</b>`).join(', ')}</span>`; box.classList.remove('hidden');
   card._oldNames = l.map((x) => x.login);
 }
+// With the mod buttons on the right, the hover toolbar (reply, pin, copy) sits just left of them, however many buttons there are and whatever their size
+document.addEventListener('mouseover', (e) => {
+  if (!document.body.classList.contains('modright')) return; const m = e.target.closest && e.target.closest('.msg.hasmod'); if (!m || m._tw) return;
+  const mod = m.querySelector(':scope > .mod, .mod'), t = m.querySelector('.tools'); if (!mod || !t) return; const w = mod.offsetWidth; if (w) { t.style.right = w + 14 + 'px'; m._tw = 1; }
+});

@@ -11,6 +11,8 @@
     pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
     text: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    chevl: '<path d="M15 18l-6-6 6-6"/>',
+    popout: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>',
     bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
     mega: '<path d="m3 11 18-5v12L3 14z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
     book: '<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 21.5A2.5 2.5 0 0 1 6.5 19H20v3H6.5"/>',
@@ -53,7 +55,7 @@
     note: '<path d="M4 4h16v13H8l-4 4z"/><path d="M8 9h8M8 13h5"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     yappy: '<path d="M12 3c5 0 9 3.4 9 7.6S17 18 12 18c-.8 0-1.6-.1-2.3-.3L5.5 21l.8-3.8C4.2 15.8 3 13.4 3 10.6 3 6.4 7 3 12 3z"/><path d="M9 8.3v2.2M14.6 8.3v2.2M9.2 13.2c1 1.1 2.2 1.5 3.4 1.3"/>',
-    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-5.4A8 8 0 1 1 21 12z"/>',
+    chat: '<path d="M6 4.5h12a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-6.5L7 20.5v-3H6a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01" stroke-width="2.6"/>',
     whisper: '<rect x="2.5" y="5" width="19" height="14" rx="2.2"/><path d="m3 7 9 6.5L21 7"/>',
     lines: '<rect x="4" y="12" width="4" height="9" rx="1"/><rect x="10" y="4" width="4" height="17" rx="1"/><rect x="16" y="9" width="4" height="12" rx="1"/>',
     help: '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4.2M12 17.5h.01"/>',
@@ -116,7 +118,8 @@
     flower: '<circle cx="12" cy="12" r="2.5"/><path d="M12 9.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM12 20.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM9.5 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20.5 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>',
     minimal: '<rect x="4" y="4" width="16" height="16"/><path d="M4 10h16"/>',
     shieldchk: '<path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
-    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'
+    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>'
   };
   // Yappy as a solid, recolourable icon: his bubble in the current text colour with the face cut out (so it follows the theme)
   const yappySvg = (size) => { const D = window.Yappy && window.Yappy.paths; if (!D) return null; return `<svg class="ic ic-fill" viewBox="419 352 1344 1461" width="${size}" height="${Math.round((size * 1461) / 1344)}" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="${D.body} ${D.eyeL} ${D.eyeR} ${D.mouth}"/></svg>`; };

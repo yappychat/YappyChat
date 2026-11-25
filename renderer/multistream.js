@@ -79,13 +79,15 @@ function mvPane(st) {
 function mvFill(pane, st) {
   const p = S.settings.pip, key = st.login + '|' + st.dupe, room = mvList().length < MV_MAX;
   if (!pane.querySelector('.sp-head')) {
-    pane.innerHTML = `<div class="sp-head"><select data-sp="channel" data-tip="Which stream to show"></select><button data-sp="add" class="addst" aria-label="Add another stream">${ico('plus', 14)}<span>Add Stream</span></button><span class="grow"></span><button data-sp="lay" aria-label="Change layout">${ico('grid', 16)}</button><button data-sp="close" data-tip="Close this stream" aria-label="Close stream">${ico('x', 16)}</button></div><div class="sp-body"></div><div class="sp-shield" aria-hidden="true"></div><div class="sp-note hidden">Hidden while a window is open over it</div>`;
+    pane.innerHTML = `<div class="sp-head"><select data-sp="channel" data-tip="Which stream to show"></select><button data-sp="add" class="addst" aria-label="Add another stream">${ico('plus', 14)}<span>Add Stream</span></button><span class="grow"></span><button data-sp="tw" data-tip="Watch on Twitch. Streams in YappyChat don&#39;t earn watch streaks or channel points" aria-label="Watch on Twitch">${ico('ext', 16)}</button><button data-sp="lay" aria-label="Change layout">${ico('grid', 16)}</button><button data-sp="close" data-tip="Close this stream" aria-label="Close stream">${ico('x', 16)}</button></div><div class="sp-body"></div><div class="sp-shield" aria-hidden="true"></div><div class="sp-note hidden">Hidden while a window is open over it</div>`;
     pane.dataset.opts = ''; pane.dataset.key = '';
   }
-  const opts = (st.id === 'main' ? `<option value="follow" ${p.channel === 'follow' ? 'selected' : ''}>Follow active tab</option>` : '') + [...S.chats.values()].map((x) => `<option value="${x.login}" ${(st.id === 'main' ? p.channel === x.login : st.login === x.login) ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  const opts = (st.id === 'main' ? `<option value="follow" ${p.channel === 'follow' ? 'selected' : ''}>Follow active tab</option>` : '') + [...S.chats.values()].map((x) => `<option value="${x.login}" ${(st.id === 'main' ? p.channel === x.login : st.login === x.login) ? 'selected' : ''}>${esc(x.name)}</option>`).join('')
+    + (() => { const more = [...(S.live || new Map()).entries()].filter(([l]) => !S.chats.has(l)).slice(0, 15); return (more.length ? `<optgroup label="Live now">${more.map(([l, v]) => `<option value="+${esc(l)}">${esc(v.name || l)}</option>`).join('')}</optgroup>` : '') + '<option value="__add">Another channel…</option>'; })();
   if (pane.dataset.opts !== opts) { pane.dataset.opts = opts; pane.querySelector('select').innerHTML = opts; }
   const head = pane.querySelector('.sp-head'); head.draggable = true; head.dataset.tip = ''; const lb = pane.querySelector('[data-sp=lay]'); lb.dataset.tip = MV_LAY_NAME[mvLay()] + '. Click to change the layout';
   const add = pane.querySelector('[data-sp=add]'); add.disabled = !room; add.dataset.tip = room ? 'Add another stream (up to 4)' : 'Four streams is the most';
+  pane.dataset.login = st.login || '';
   if (pane.dataset.key !== key) { // the player is rebuilt only when the channel changes
     pane.dataset.key = key; const body = pane.querySelector('.sp-body'); body.innerHTML = ''; pane.style.removeProperty('--cc'); const col = chanColor(st.login); if (col) pane.style.setProperty('--cc', col); pane.classList.toggle('cc', !!col);
     if (st.dupe) { body.innerHTML = `<div class="sp-dupe">${esc((S.chats.get(st.login) || {}).name || st.login)} is already shown in another stream. Pick a different channel in the menu above.</div>`; return; }
@@ -144,10 +146,11 @@ function mvAdd() {
   const p = S.settings.pip, list = mvList(), used = new Set(list.map((s) => s.login));
   if (list.length >= MV_MAX) return toast('Four streams is the most YappyChat shows at once.', { ms: 3000 });
   const keys = [...S.chats.keys()], last = keys.indexOf(list[list.length - 1].login), pick = [...keys.slice(last + 1), ...keys.slice(0, last + 1)].find((k) => !used.has(k));
-  if (!pick) return toast('Every open channel is already shown. Add another channel with the + beside the tabs first.', { ms: 4000 });
+  if (!pick) return addChannelPrompt(); // nothing else open: pick a channel to add (its stream can then be shown)
   if (!mvRoomFor(list.length + 1)) return toast('There is not enough room for another stream. Twitch needs each video at least 400 x 300, so make the window bigger or close a stream.', { ms: 6000 });
   const room = 6 - (list.length + 1), nSet = (S.settings.splitSet || []).filter((x) => S.chats.has(x)).length;
   savePip({ extra: [...mvExtra(), pick], open: true }, false);
+  if (list.length + 1 >= 3) toast("Twitch may not count you as a viewer when more than two streams play at once, which can lower those streamers' view counts.", { ms: 10000 });
   if (S.settings.split && nSet > room) toast(`Showing ${room} ${room === 1 ? 'chat' : 'chats'} so the ${list.length + 1} streams fit (six panes at most).`, { ms: 5000 });
   else toast(`Added ${(S.chats.get(pick) || {}).name || pick}. Pick another channel in its menu if you like.`, { ms: 3500 });
 }
@@ -162,9 +165,16 @@ function mvClose(sid) {
 }
 $('#chats').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-sp]'); if (!b) return; const pane = b.closest('.vpane'), a = b.dataset.sp;
+  if (a === 'tw') { if (pane && pane.dataset.login) openLink('https://www.twitch.tv/' + pane.dataset.login); return; }
   if (a === 'add') mvAdd(); else if (a === 'close' && pane) mvClose(pane.dataset.sid); else if (a === 'lay') { const opts = MV_LAYS.filter((x) => x !== 'between' || (S.settings.split && (S.settings.splitSet || []).filter((y) => S.chats.has(y)).length >= 2)), l = opts[(opts.indexOf(mvLay()) + 1) % opts.length]; savePip({ mvLay: l }, false); applySplit(); toast(MV_LAY_NAME[l] + '. Drag the divider to resize.', { ms: 2800 }); } else if (a === 'shrink') { const ex = mvExtra(); if (ex.length) savePip({ extra: ex.slice(0, -1) }, false); }
 });
-$('#chats').addEventListener('change', (e) => { const s = e.target.closest && e.target.closest('select[data-sp=channel]'); if (s) mvChange(s.closest('.vpane').dataset.sid, s.value); });
+// The stream menu also lists followed channels that are live but not open, and "Another channel…", so a single offline stream can always be swapped
+$('#chats').addEventListener('change', async (e) => {
+  const s = e.target.closest && e.target.closest('select[data-sp=channel]'); if (!s) return; const sid = s.closest('.vpane').dataset.sid, v = s.value;
+  if (v === '__add') { s.closest('.vpane').dataset.opts = ''; applySplit(); return addChannelPrompt(); }
+  if (v.startsWith('+')) { const l = v.slice(1); await addChannel(l, false); s.closest('.vpane') && (s.closest('.vpane').dataset.opts = ''); return mvChange(sid, l); }
+  mvChange(sid, v);
+});
 
 // ----- the divider between streams and chats (drag to resize, double-click to reset) and dragging a stream to a new place -----
 function mvGrip(g) {

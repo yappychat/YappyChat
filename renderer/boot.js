@@ -5,7 +5,7 @@ const palette = () => (PALETTES.some((x) => x[0] === S.settings.palette) ? S.set
 function applyTheme() {
   const r = document.documentElement, st = r.style, pal = palette(); r.dataset.theme = ['light', 'soft'].includes(S.settings.theme) ? S.settings.theme : 'dark'; r.dataset.palette = pal;
   st.setProperty('--fs', S.settings.fontSize + 'px'); st.setProperty('--gifl', String(Math.min(5, Math.max(2, +S.settings.gifLines || 4)))); st.setProperty('--emh', { sm: '1.45em', md: '1.9em', lg: '2.5em' }[S.settings.emoteSize] || '1.9em');
-  r.classList.toggle('no-yappy-anim', S.settings.yappyAnimate === false || pal === 'minimal'); syncFocus(true); document.body.classList.toggle('compact', S.settings.compact !== false); document.body.classList.toggle('altrows', !!S.settings.altRows); document.body.classList.toggle('modright', S.settings.modSide === 'right'); document.body.classList.toggle('hidedel', S.settings.showDeleted === false); document.body.classList.toggle('minimal', pal === 'minimal');
+  r.classList.toggle('no-yappy-anim', S.settings.yappyAnimate === false || pal === 'minimal'); syncFocus(true); document.body.classList.toggle('compact', S.settings.compact !== false); document.body.classList.toggle('altrows', !!S.settings.altRows); document.body.classList.toggle('nocounts', S.settings.countPills === false); document.body.classList.toggle('modright', S.settings.modSide === 'right'); document.body.classList.toggle('hidedel', S.settings.showDeleted === false); document.body.classList.toggle('minimal', pal === 'minimal');
   const cb = CB_MODES.includes(S.settings.cbMode) ? S.settings.cbMode : ''; if (cb) r.dataset.cb = cb; else delete r.dataset.cb; document.body.classList.toggle('cues', !!S.settings.cbCues);
   document.body.classList.toggle('nomod', !!S.settings.notMod);
   // The window's title bar (the Windows buttons) takes the colours of the top bar
@@ -154,6 +154,7 @@ async function start() {
   loadGlobals().catch((e) => dbg('globals ' + e)); loadBlocks(); connect(); connectES(); renderSide(); initYappy(); S.statTimer = setInterval(softStats, 15000); S.jpTimer = setInterval(flushJP, 60000); S.feedTimer = setInterval(() => { if (pruneFeeds() && S.settings.sidebar) { if (['firsts', 'joins', 'modact'].some(sideShows)) renderSide(); else renderBell(); } }, 5000); S.annTimer = setInterval(annTick, 30000);
   try { S.playerBase = (await cg.playerBase()) || {}; } catch (e) { S.playerBase = {}; dbg('playerBase ' + e); } // the timers above must never wait on this
   Perks.load().then(() => Perks.refreshMine()).then(() => { applyHoliday(); }); Perks.ping(); S.perkTimer = setInterval(() => Perks.load().then(() => Perks.refreshMine()), 5 * 60000);
+  if (S.settings.hwAccelAuto) { saveSettings({ hwAccelAuto: 0 }); setTimeout(() => toast('Your graphics driver kept crashing, so YappyChat switched graphics acceleration off. You can change this in Settings > General.', { ms: 15000 }), 5000); }
   S.loadingTabs = true; // the saved split view must not be cut down to the few chats that have loaded so far
   for (const t of (S.settings.tabs || []).slice(0, MAX_CHANNELS)) await addChannel(t, false);
   S.loadingTabs = false;
@@ -166,7 +167,7 @@ async function start() {
   // Only when there are no logs yet: an existing install keeps whatever it had, and nothing anyone saved is ever deleted by this.
   if (S.settings.logKeepDays === undefined && cg.logsSize) Promise.resolve().then(() => cg.logsSize()).then((r) => { if (r && !r.files && S.settings.logKeepDays === undefined) saveSettings({ logKeepDays: 90 }); }).catch(() => {});
   checkWhatsNew(); loadWhispers(); setTimeout(checkNotice, 4000); checkFlags(); setInterval(checkFlags, 15 * 60000);
-  pollLive().then(announceLive); S.liveTimer = setInterval(pollLive, 60000); // after the tabs exist, so the first count includes them
+  pollLive().then(() => { /* the who's-live list waits until the window is first on screen, so starting minimised doesn't hide it */ if (!document.hidden) return announceLive(); const go = () => { if (document.hidden) return; document.removeEventListener('visibilitychange', go); announceLive(); }; document.addEventListener('visibilitychange', go); }); S.liveTimer = setInterval(pollLive, 60000); // after the tabs exist, so the first count includes them
 }
 
 /* ---------- Header and shortcuts ---------- */

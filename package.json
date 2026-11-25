@@ -1,7 +1,7 @@
 {
   "name": "yappychat",
   "productName": "YappyChat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "YappyChat - moderation-first Twitch chat client",
   "main": "main.js",
   "scripts": {
@@ -19,7 +19,14 @@
     "appId": "com.yappychat.app",
     "productName": "YappyChat",
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico",
       "requestedExecutionLevel": "asInvoker",
       "artifactName": "YappyChat-Setup-${version}.${ext}"
@@ -46,6 +53,9 @@
     ],
     "files": [
       "main.js",
+      "emojitext.js",
+      "playerpage.js",
+      "updatehold.js",
       "preload.js",
       "renderer/**",
       "build/icon.png",

@@ -74,14 +74,14 @@ const offerKind = (t) => (t.startsWith('mod-repeat-') ? 'modrepeat' : t.startsWi
 // How big something has to be before Yappy speaks up (Settings > Yappy > Spam, "How busy your chats are").
 // Automatic starts from the Medium numbers and raises the spam and first-timer ones in busy chats, so a 1,000-person chat isn't
 // told about every meme wave. The sizes are fixed numbers; Custom is whatever you typed into the boxes.
-const YL_DEF = { spamN: 20, spamS: 20, repeatN: 4, wordN: 3, firstsN: 6, firstsS: 30, actsN: 8, actsM: 2, modrepN: 3, modrepM: 30, coolM: 5 };
+const YL_DEF = { spamN: 20, spamS: 20, repeatN: 4, repeatS: 30, wordN: 3, firstsN: 6, firstsS: 30, actsN: 8, actsM: 2, modrepN: 3, modrepM: 30, coolM: 5 };
 const YL_SIZES = {
-  small: { spamN: 8, spamS: 20, repeatN: 3, wordN: 3, firstsN: 4, firstsS: 30, actsN: 6, actsM: 2, modrepN: 3, modrepM: 30, coolM: 5 },
+  small: { spamN: 8, spamS: 20, repeatN: 3, repeatS: 30, wordN: 3, firstsN: 4, firstsS: 30, actsN: 6, actsM: 2, modrepN: 3, modrepM: 30, coolM: 5 },
   medium: YL_DEF,
-  large: { spamN: 50, spamS: 20, repeatN: 5, wordN: 5, firstsN: 15, firstsS: 30, actsN: 15, actsM: 2, modrepN: 3, modrepM: 30, coolM: 10 },
-  huge: { spamN: 120, spamS: 20, repeatN: 6, wordN: 8, firstsN: 40, firstsS: 30, actsN: 25, actsM: 2, modrepN: 4, modrepM: 30, coolM: 15 },
+  large: { spamN: 50, spamS: 20, repeatN: 5, repeatS: 30, wordN: 5, firstsN: 15, firstsS: 30, actsN: 15, actsM: 2, modrepN: 3, modrepM: 30, coolM: 10 },
+  huge: { spamN: 120, spamS: 20, repeatN: 6, repeatS: 30, wordN: 8, firstsN: 40, firstsS: 30, actsN: 25, actsM: 2, modrepN: 4, modrepM: 30, coolM: 15 },
 };
-const YL_MAX = { spamN: 2000, spamS: 120, repeatN: 50, wordN: 50, firstsN: 1000, firstsS: 300, actsN: 200, actsM: 30, modrepN: 20, modrepM: 240, coolM: 120 };
+const YL_MAX = { spamN: 2000, spamS: 120, repeatN: 50, repeatS: 600, wordN: 50, firstsN: 1000, firstsS: 300, actsN: 200, actsM: 30, modrepN: 20, modrepM: 240, coolM: 120 };
 const ylSize = () => (S.settings.yappySize in YL_SIZES || S.settings.yappySize === 'custom' ? S.settings.yappySize : 'auto');
 const ylBase = (z = ylSize()) => (z === 'custom' ? { ...YL_DEF, ...(S.settings.yappyLimits || {}) } : YL_SIZES[z] || YL_DEF);
 const yl = (k) => { const v = Math.round(+ylBase()[k]); return v > 0 ? Math.min(v, YL_MAX[k]) : YL_DEF[k]; };
@@ -150,7 +150,8 @@ function watch(c, m) {
   const same = R.by.get(norm) || [], users = new Set(same.map((x) => x.u));
   const auto = ylSize() === 'auto', spamN = auto ? Math.max(yl('spamN'), Math.ceil(R.q.length * 0.2)) : yl('spamN'); // automatic: a wave must also be a fifth of what's being said
   if (same.length >= spamN) offer(c, 'spam', ylCool(), { text: `The same message was posted ${same.length} times in ${fmtDurLong(yl('spamS'))} in ${c.name}${users.size > 1 ? ', by ' + users.size + ' people' : ''}. Want to slow chat down?`, mood: 'surprised', actions: [{ label: 'Slow mode 10s', primary: true, fn: () => setMode(c, { slow_mode: true, slow_mode_wait_time: 10 }) }, { label: 'Emote-only', fn: () => setMode(c, { emote_mode: true }) }, { label: 'Subs-only', fn: () => setMode(c, { subscriber_mode: true }) }] });
-  else if (same.filter((x) => x.u === m.uid).length >= yl('repeatN')) offer(c, 'rep-' + m.login, ylCool(), { text: `${m.name} has sent the same message ${same.filter((x) => x.u === m.uid).length} times in ${c.name}.`, mood: 'thinking', actions: [{ label: 'Timeout 10m', primary: true, fn: () => ban(c, m.uid, m.login, 600, 'Repeated spam') }] });
+  else { const P = c.rep || (c.rep = new Map()), rw = yl('repeatS') * 1000, mine = (P.get(m.uid) || []).filter((x) => now - x.t < rw); mine.push({ t: now, n: norm }); if (mine.length > 60) mine.splice(0, mine.length - 60); P.set(m.uid, mine); if (P.size > 3000) P.delete(P.keys().next().value);
+    const reps = mine.filter((x) => x.n === norm).length; if (reps >= yl('repeatN')) offer(c, 'rep-' + m.login, ylCool(), { text: `${m.name} has sent the same message ${reps} times in ${fmtDurLong(yl('repeatS'))} in ${c.name}.`, mood: 'thinking', actions: [{ label: 'Timeout 10m', primary: true, fn: () => ban(c, m.uid, m.login, 600, 'Repeated spam') }] }); }
   if (m.first) { const fw = yl('firstsS') * 1000, fN = ylSize() === 'auto' ? Math.max(yl('firstsN'), Math.ceil(R.q.length * (fw / win) * 0.08)) : yl('firstsN'); c.firstT.push(now); c.firstT = c.firstT.filter((t) => now - t < fw); if (c.firstT.length >= fN && !(c.raid && now - c.raid.at < 5 * 60000)) offer(c, 'raid', ylCool(), /* a raid that Twitch announced already has its own bar with the same buttons */ { text: `Lots of first-time chatters just arrived in ${c.name}. Could be a raid.`, mood: 'surprised', actions: [{ label: 'Followers-only 10m', primary: true, fn: () => setMode(c, { follower_mode: true, follower_mode_duration: 10 }) }, { label: 'Shield Mode on', fn: () => setShield(c, true) }] }); }
 }
 
@@ -162,7 +163,8 @@ async function pollLive() {
   const tabs = [...new Set([S.me.login, ...S.chats.keys()])].slice(0, 100);
   if (tabs.length) { const r = await helix('streams', { query: tabs.map((l) => 'user_login=' + l).join('&') + '&first=100' }); if (ok(r)) add(r); }
   if (S.liveBase) { const fresh = []; now.forEach((v, l) => { if (!S.live.has(l) && l !== S.me.login) fresh.push([l, v]); }); fresh.length > 1 ? onLiveMany(fresh) : fresh.forEach(([l, v]) => onLive(l, v)); }
-  S.live = now; S.liveBase = true; dashSample(now.get(S.me.login)).catch((e) => dbg('dash ' + e));
+  if (S.liveBase) { S.ended = S.ended || new Map(); S.live.forEach((v, l) => { if (!now.has(l)) S.ended.set(l, Date.now()); }); now.forEach((v, l) => S.ended && S.ended.delete(l)); }
+  S.live = now; S.liveBase = true; try { paintEnded(); } catch (e) {} dashSample(now.get(S.me.login)).catch((e) => dbg('dash ' + e));
   S.chats.forEach((c) => { const v = now.get(c.login); if (!v) { c.lastGame = null; return; } if (v.game && v.game !== c.lastGame) { if (c.lastGame) logAct(c, 'mode', `${c.name} changed category to ${v.game}`); c.games.push({ ts: Date.now(), game: v.game }); c.lastGame = v.game; } });
   renderTabs(); renderStats();
 }
@@ -170,7 +172,7 @@ function onLive(login, v) {
   if (!S.chats.has(login) && !S.settings.liveFollowed) return;
   lvLog({ login, name: v.name, game: v.game, title: v.title }); // always kept in the Live section (not Yappy's)
   if (!S.settings.liveNotify) return;
-  flashMe(`${v.name} is live`); play('live', login); liveFloat(`${v.name} is live`, login);
+  flashMe(`${v.name} is live`, 'live'); play('live', login); liveFloat(`${v.name} is live`, login);
   if (S.settings.liveDesktop && !S.settings.streamer && 'Notification' in window) { try { const n = new Notification(`${v.name} is live`, { body: v.title || v.game || '', tag: 'yappy-live' }); n.onclick = () => addChannel(login); } catch (e) {} }
 }
 // Several at once (most often after the computer wakes up): one note, one sound and one desktop notification, not a pile
@@ -179,7 +181,7 @@ function onLiveMany(list) {
   list.forEach(([login, v]) => lvLog({ login, name: v.name, game: v.game, title: v.title }));
   if (!S.settings.liveNotify) return;
   const text = list.length === 2 ? `${list[0][1].name} and ${list[1][1].name} are live` : `${list.slice(0, 2).map(([, v]) => v.name).join(', ')} and ${list.length - 2} more are live`;
-  flashMe(text); play('live', list[0][0]); liveFloat(text, '');
+  flashMe(text, 'live'); play('live', list[0][0]); liveFloat(text, '');
   if (S.settings.liveDesktop && !S.settings.streamer && 'Notification' in window) { try { const n = new Notification(text, { body: list.map(([, v]) => v.name).join(', '), tag: 'yappy-live' }); n.onclick = () => openLivePop(); } catch (e) {} }
 }
 // After sleep: notes and Yappy messages that queued up while the computer was off are folded away, so you don't come back to a stack of them
@@ -188,10 +190,10 @@ try { cg.onWake && cg.onWake(() => { S.wokeAt = Date.now(); try { Yappy.flush();
 // On login: tell the user how many of their channels are live right now
 function announceLive() {
   if (!S.chats.size) return; const live = [...S.chats.keys()].filter((l) => S.live.has(l)), n = live.length, tot = S.chats.size;
-  const names = live.slice(0, 3).map((l) => S.live.get(l).name || l).join(', ') + (n > 3 ? ` and ${n - 3} more` : '');
+  const names = live.slice(0, 10).map((l) => S.live.get(l).name || l).join(', ') + (n > 10 ? ` and ${n - 10} more` : '');
   const text = n ? `${n} of your ${tot} channel${tot === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} live right now: ${names}.` : `None of your ${tot} channel${tot === 1 ? ' is' : 's are'} live right now.`;
   lvLog({ summary: true, text, login: n === 1 ? live[0] : '', name: n === 1 ? (S.live.get(live[0]).name || live[0]) : '' });
-  notifyYappy(text, n ? [{ label: n === 1 ? 'Open chat' : 'Open first', primary: true, fn: () => setActive(live[0]) }] : [], 'live', live.slice(0, 3).map((l) => ({ login: l, name: S.live.get(l).name || l })), true);
+  notifyYappy(text, n ? [{ label: n === 1 ? 'Open chat' : 'Open first', primary: true, fn: () => setActive(live[0]) }] : [], 'live', live.slice(0, 10).map((l) => ({ login: l, name: S.live.get(l).name || l })), true);
 }
 
 // Yappy speaks once the notes in the corner have gone (at most 8 seconds later), so a "Banned … / Undo" note and his suggestion never pile up together
@@ -206,3 +208,20 @@ document.addEventListener('change', (e) => {
   }
 });
 function ylPaint(box) { box.querySelectorAll('input.ynum[data-yl]').forEach((i) => { if (document.activeElement !== i) i.value = yl(i.dataset.yl); }); box.querySelectorAll('.yauto').forEach((x) => x.classList.toggle('hidden', ylSize() !== 'auto')); }
+
+// A stream that ends while it is open (often while the PC is locked or YappyChat is minimised) leaves Twitch's player spinning.
+// Cover it with a plain "offline" card instead; it lifts by itself when the channel goes live again, or on "Reload".
+function paintEnded() {
+  const ended = S.ended || new Map(), spots = [];
+  document.querySelectorAll('#chats .vpane').forEach((p) => spots.push([p.querySelector('.sp-body'), (p.dataset.key || '').split('|')[0]]));
+  const pb = document.querySelector('#pip webview'); if (pb) spots.push([pb.parentElement, S.pipLogin]);
+  spots.forEach(([box, login]) => {
+    if (!box || !login) return; let card = box.querySelector(':scope > .sp-off'); const wv = box.querySelector('webview'), at = ended.get(login);
+    if (!at || !wv) { if (card) card.remove(); if (wv) wv.style.visibility = ''; return; }
+    if (card) return; const c = S.chats.get(login) || {};
+    card = el('div', 'sp-off', `${c.avatar ? `<img src="${esc(c.avatar)}" alt="">` : ''}<b>${esc(c.name || login)} is offline</b><span>The stream ended around ${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</span><button class="btn sm" type="button">Reload the player</button>`);
+    card.querySelector('button').onclick = () => { ended.delete(login); card.remove(); wv.style.visibility = ''; try { wv.reload(); } catch (e) {} };
+    wv.style.visibility = 'hidden'; box.append(card);
+  });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.liveBase && Date.now() - (S.livePolledAt || 0) > 20000) { S.livePolledAt = Date.now(); pollLive().catch(() => {}); } });

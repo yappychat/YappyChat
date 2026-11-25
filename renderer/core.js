@@ -3,19 +3,36 @@
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 // Flash the taskbar button (and the tray icon) when something needs you and you are in another window
-function flashMe(why) { try { if (S.settings.flashOn === false || S.settings.streamer || !isBg() || !cg.flash) return; cg.flash(String(why || '')); } catch (e) {} }
+function flashMe(why, kind) { try { if (S.settings.flashOn === false || (kind && (S.settings.flashOn || {})[kind] === false) || S.settings.streamer || !isBg() || !cg.flash) return; cg.flash(String(why || '')); } catch (e) {} }
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 /* Switches published from yappy.chat/admin (see checkFlags): a feature listed in S.flags.off is turned off for everyone until it is switched back on */
 const flagOff = (k) => !!(S.flags && S.flags.off && S.flags.off[k]);
+/* Nicknames you give people: only you see them. Kept by Twitch account ID, so they survive a name change. */
+const NICK_RE = /^[\p{L}\p{N}_]{1,25}$/u;
+const nickOf = (uid) => { const x = uid && (S.settings.nicks || {})[uid]; return (x && x.nick) || ''; };
+const nickByLogin = (login) => { const n = S.settings.nicks || {}; for (const k in n) if (n[k].login === login) return n[k].nick; return ''; };
+/* The name you can @: Twitch shows non-English display names with their login after them, e.g. 黒うーろん (xuxke) */
+const atName = (name, login) => (name && login && name.toLowerCase() !== login ? login : name || login || '');
+/* A person's name for lists and cards: a non-English display name gets the name you can @ after it, like Twitch, e.g. 黒うーろん (xuxke) */
+const unmT = (name, login) => { name = String(name || login || ''); const at = atName(name, login ? String(login).toLowerCase() : ''); return at && at.toLowerCase() !== name.toLowerCase() ? `${name} (${at})` : name; }; // the same, as plain text
+const unm = (name, login) => { name = String(name || login || ''); const at = atName(name, login ? String(login).toLowerCase() : ''); return esc(name) + (at && at.toLowerCase() !== name.toLowerCase() ? `<span class="lg"> (${esc(at)})</span>` : ''); };
+/* A chat name: the nickname or display name, then the @-able name in brackets when it differs */
+function nameHtml(name, login, nk) { const at = atName(name, login), shown = nk || name || login; return esc(shown) + (shown.toLowerCase() !== at.toLowerCase() ? `<span class="lg"> (${esc(at)})</span>` : ''); }
+/* "@nick" in what you type becomes the person's real Twitch name when it's sent, so everyone else sees who you mean */
+function nicksToNames(text, c) {
+  const n = S.settings.nicks || {}, map = new Map(); for (const k in n) if (n[k].nick && n[k].login) map.set(n[k].nick.toLowerCase(), atName(n[k].name, n[k].login));
+  if (!map.size) return text;
+  return text.replace(/@([\p{L}\p{N}_]+)/gu, (m0, w) => { const lw = w.toLowerCase(); if (c && c.users && c.users.has(lw)) return m0; const real = map.get(lw); return real ? '@' + real : m0; });
+}
 const unesc = (s = '') => s.replace(/\\s/g, ' ').replace(/\\:/g, ';').replace(/\\r/g, '').replace(/\\n/g, ' ').replace(/\\\\/g, '\\');
 const MAX_CHANNELS = 50;
 const CB_MODES = ['protan', 'deutan', 'tritan'];
 // Every stat that can appear in the Session Information strip: [key, label, default on]
 // What each counter counts (shown when you rest on it): your own actions, not the whole mod team's (Mod activity has everyone's)
-const STAT_TIP = { bans: 'Bans you made since you opened this chat', timeouts: 'Timeouts you gave since you opened this chat', deletes: 'Messages you deleted since you opened this chat', warns: 'Warnings you sent since you opened this chat', chatters: 'Different people who chatted since you opened this chat', msgs: 'Messages since you opened this chat' };
+const STAT_TIP = { bans: 'Bans by every moderator since you opened this chat', timeouts: 'Timeouts by every moderator since you opened this chat', deletes: 'Messages deleted by every moderator since you opened this chat', warns: 'Warnings by every moderator since you opened this chat', chatters: 'Different people who chatted since you opened this chat', msgs: 'Messages since you opened this chat' };
 const STAT_DEFS = [['bans', 'Bans', 1], ['timeouts', 'Timeouts', 1], ['deletes', 'Deletes', 1], ['warns', 'Warnings', 0], ['chatters', 'Chatters', 1], ['msgs', 'Chats', 1], ['mpm', 'Chats / min', 0], ['emotes', 'Emotes sent', 0], ['firsts', 'First-timers', 0], ['viewers', 'Viewers', 1], ['live', 'Time live', 1], ['games', 'Games played', 0]];
 // Sound events: [key, label, default tone, default on]
-const SOUND_EVENTS = [['highlight', 'Highlighted message', 'bubble', 1], ['watch', 'Watch-list chatter', 'shine', 1], ['live', 'Someone goes live', 'golive', 1], ['automod', 'AutoMod or unban request', 'headsup', 1], ['yappy', 'Yappy suggestion', 'tap', 1], ['first', 'First-time chatter', 'welcome', 0], ['whisper', 'Whisper received', 'hush', 1], ['alert', 'Alert from a mod (/alert)', 'attention', 1]];
+const SOUND_EVENTS = [['highlight', 'Highlighted message', 'bubble', 1], ['watch', 'Watch-list chatter', 'shine', 1], ['live', 'Someone goes live', 'golive', 1], ['automod', 'AutoMod held a message', 'headsup', 1], ['unban', 'Unban request', 'headsup', 1], ['yappy', 'Yappy suggestion', 'tap', 1], ['first', 'First-time chatter', 'welcome', 0], ['whisper', 'Whisper received', 'hush', 1], ['alert', 'Alert from a mod (/alert)', 'attention', 1]];
 const DEF = {
   theme: 'dark', fontSize: 14, timestamps: true, logging: true, hl: [], watch: [], notes: {}, tabs: [], timeoutDefault: 600, clientId: '', split: false, sidebar: false, hlMention: true, badges: true, confirmBans: false,
   emotes7tv: true, emotesBttv: true, emotesFfz: true, zeroWidth: true, emoteSize: 'md', volume: 0.6, soundOn: {}, soundTone: {}, soundCustom: {},
@@ -23,7 +40,7 @@ const DEF = {
   modButtons: 'always', modSide: 'left', hoverKeys: false, pauseHover: true, linkWarn: true, flyout: true, streamer: false, streamerMute: true,
   season: 'auto', holidayTheme: true, holidayLogo: true, holidayYappy: true, statsShow: {}, colW: {}, splitSet: [],
   perkIds: {}, myPerk: null,
-  tsFormat: 'HH:MM:SS', sharedAvatars: true, sessHide: true, cbMode: 'off', cbNames: true, cbCues: false, sharePing: true, seenVersion: '', noticeSeen: 0, chanStyle: {}, amChat: true, amChatAuto: true, amChatTerms: true, pauseBlur: true, feedMin: 2, lastPing: '', compact: true, lastActive: '', myLoadout: null, yappyNotify: false, history: true, historyCount: 100, trackJoins: true, closeAction: 'quit', bgChats: 'open', sideW: 340, blacklist: [], blNames: true,
+  tsFormat: 'HH:MM:ss', sharedAvatars: true, sessHide: true, cbMode: 'off', cbNames: true, cbCues: false, sharePing: true, seenVersion: '', noticeSeen: 0, chanStyle: {}, amChat: true, amChatAuto: true, amChatTerms: true, pauseBlur: true, feedMin: 2, lastPing: '', compact: true, lastActive: '', myLoadout: null, yappyNotify: false, history: true, historyCount: 100, trackJoins: true, closeAction: 'quit', bgChats: 'open', sideW: 340, blacklist: [], blNames: true,
   macros: [], announcements: [], banList: [], banAuto: false, shifts: {}, tl: {}, chanNotes: {}, linkQueue: true, linkAllow: [],
   palette: 'default', notMod: false, focus: false, sideLabels: false, greetings: ['Welcome to the chat, {user}!', 'Hey {user}, welcome in! Have a look at the rules if you get a moment.'], flashOn: true, warnSaved: [], toPresets: [60, 600, 3600, 86400, 604800], railTools: [], hideFromCapture: false, lockMin: 0, lockSalt: '', lockHash: '', revokeOnLogout: true, yappyBuzz: true, alertsOn: true, startWin: false, startHidden: false, toolsOpen: {},
   pip: { open: false, channel: 'follow', w: 480, muted: true, corner: 1, dock: null, dockSize: 0.45, extra: [] }
@@ -91,10 +108,11 @@ const sw = (id, on) => `<label class="sw"><input type="checkbox" id="${id}" ${on
   let tip, t = 0;
   const hide = () => { clearTimeout(t); if (tip) tip.classList.remove('on'); };
   document.addEventListener('mouseover', (e) => {
-    const n = e.target.closest && e.target.closest('[data-tip]'); if (!n) return hide();
+    const n = e.target.closest && e.target.closest('[data-tip],img.emote[data-em]'); if (!n) return hide();
     clearTimeout(t); t = setTimeout(() => {
       if (!tip) { tip = el('div', 'tip'); document.body.append(tip); }
-      tip.textContent = n.dataset.tip; tip.classList.add('on');
+      const card = n.dataset.em != null && n.dataset.tip == null && typeof emoteCard === 'function'; // an emote in chat: a bigger picture, where it's from and who made it
+      tip.classList.toggle('emc', card); if (card) tip.innerHTML = emoteCard(n); else tip.textContent = n.dataset.tip; tip.classList.add('on');
       const r = n.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
       tip.style.left = Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) + 'px';
       if (n.dataset.tipSide === 'left') { tip.style.left = Math.max(6, r.left - w - 8) + 'px'; tip.style.top = Math.max(6, Math.min(innerHeight - h - 6, r.top + r.height / 2 - h / 2)) + 'px'; return; }
@@ -141,13 +159,20 @@ function closeLayer() { closePop(); closeModal(); }
 function popover(node, anchor, o = {}) {
   if (o.toggle && S.pop && S.pop.anchor === anchor) { closePop(); return false; } // pressing the same button again closes it
   closePop(); node.classList.add('pop'); if (!o.nox && !hasClose(node) && (node.querySelector(':scope > h3') || node.classList.contains('ucard'))) { node.classList.add('hasx'); node.append(closeX(closePop)); } $('#pops').append(node);
+  // Stays beside its button, even when the window is resized and the button is redrawn; once dragged by its title it stays where you put it
   const fit = () => {
-    const r = anchor.getBoundingClientRect(), w = node.offsetWidth, h = node.offsetHeight;
-    node.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px';
-    node.style.top = Math.max(8, Math.min(innerHeight - h - 8, o.vcenter ? (innerHeight - h) / 2 : o.up ? r.top - h - 8 : r.bottom + 6)) + 'px';
+    const w = node.offsetWidth, h = node.offsetHeight, clamp = (v, max) => Math.max(8, Math.min(max, v));
+    if (node._moved) { node.style.left = clamp(parseFloat(node.style.left) || 8, innerWidth - w - 8) + 'px'; node.style.top = clamp(parseFloat(node.style.top) || 8, innerHeight - h - 8) + 'px'; return; }
+    if (!anchor.isConnected && o.reanchor) { const a2 = o.reanchor(); if (a2) { anchor = a2; if (S.pop && S.pop.node === node) S.pop.anchor = a2; } }
+    const r = anchor.getBoundingClientRect(); if (anchor.isConnected === false || (anchor.nodeType && !r.width && !r.height)) { node.style.left = clamp(parseFloat(node.style.left) || 8, innerWidth - w - 8) + 'px'; node.style.top = clamp(parseFloat(node.style.top) || 8, innerHeight - h - 8) + 'px'; return; }
+    node.style.left = clamp(o.side === 'left' ? r.left - w - 8 : r.right - w, innerWidth - w - 8) + 'px';
+    node.style.top = clamp(o.vcenter ? (innerHeight - h) / 2 : o.side === 'left' ? r.bottom - h : o.up ? r.top - h - 8 : r.bottom + 6, innerHeight - h - 8) + 'px';
   };
-  fit(); let ro = null; if (window.ResizeObserver) { ro = new ResizeObserver(fit); ro.observe(node); }
-  S.pop = { node, anchor, sticky: !!o.sticky, onClose: () => { if (ro) ro.disconnect(); if (o.onClose) o.onClose(); } };
+  fit(); let ro = null; if (window.ResizeObserver) { ro = new ResizeObserver(fit); ro.observe(node); } addEventListener('resize', fit);
+  if (o.drag) { const hd = node.querySelector(':scope > h3'); if (hd) { hd.classList.add('popdrag'); hd.dataset.tip = 'Drag to move'; hd.addEventListener('pointerdown', (e) => { if (e.button) return; const r0 = node.getBoundingClientRect(), dx = e.clientX - r0.left, dy = e.clientY - r0.top; hd.setPointerCapture(e.pointerId);
+    const mv = (ev) => { node._moved = true; node.style.left = ev.clientX - dx + 'px'; node.style.top = ev.clientY - dy + 'px'; fit(); }; const up = () => { hd.removeEventListener('pointermove', mv); hd.removeEventListener('pointerup', up); };
+    hd.addEventListener('pointermove', mv); hd.addEventListener('pointerup', up); }); } }
+  S.pop = { node, anchor, sticky: !!o.sticky, onClose: () => { if (ro) ro.disconnect(); removeEventListener('resize', fit); if (o.onClose) o.onClose(); } };
   return true;
 }
 // Every window and titled panel gets a small × in its corner, for people who don't know to click outside or press Esc
@@ -292,7 +317,7 @@ function playSound(tone, ev, force) {
   Sounds.play(tone, v);
 }
 // Events that can use a channel's own sound (set by right-clicking its tab)
-const CH_SOUND_EVENTS = ['highlight', 'watch', 'first', 'automod', 'live'];
+const CH_SOUND_EVENTS = ['highlight', 'watch', 'first', 'automod', 'unban', 'live'];
 // Alert sounds never overlap (if two things happen together only the first is heard) and each kind has a cooldown, so nobody can spam a sound to grab your attention
 function play(ev, channel) {
   const s = S.settings, d = SOUND_EVENTS.find((x) => x[0] === ev); if (!d) return;
@@ -301,7 +326,7 @@ function play(ev, channel) {
   if (s.yappyBuzz !== false && !s.streamer && !s.focus && ev !== 'first' && window.Yappy && Yappy.buzz) { try { Yappy.buzz(); } catch (e) {} } // Yappy buzzes for every notification, even when sounds are off
   const cs = channel && CH_SOUND_EVENTS.includes(ev) ? (s.chanStyle || {})[channel] : null, own = cs && cs.sound;
   if (s.streamer && s.streamerMute) return;
-  const on = (s.soundOn || {})[ev]; if (on === undefined ? !d[3] : !on) return;
+  const so = s.soundOn || {}, on = ev === 'unban' && so.unban === undefined ? so.automod : so[ev]; if (on === undefined ? !d[3] : !on) return; // unban requests used to share the AutoMod switch
   if (own === 'none') return; // silent in this channel
   const now = Date.now(), cd = (s.soundCooldown === undefined ? 10 : +s.soundCooldown) * 1000;
   if (now < soundBusy || now - (lastPlay[ev] || 0) < Math.max(400, cd)) return;

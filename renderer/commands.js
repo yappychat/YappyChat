@@ -91,6 +91,7 @@ const COMMANDS = [
   ['unraid', '/unraid', 'Cancel a raid (channel owner)', 'owner', async (c) => askScope('channel:manage:raids', async () => { const r = await helix('raids', { method: 'DELETE', query: { broadcaster_id: c.id } }); ok(r) ? toast('Raid cancelled', { ms: 3000 }) : toolErr(r, c, 'cancel a raid', true); })],
   ['commercial', '/commercial [30|60|90|120|150|180]', 'Run an ad break (the streamer; editors are taken to Stream Manager)', 'any', (c, a) => !isOwner(c) ? viaStreamManager(c) : askScope('channel:edit:commercial', async () => { const len = [30, 60, 90, 120, 150, 180].includes(+a[0]) ? +a[0] : 30; const r = await helix('channels/commercial', { method: 'POST', body: { broadcaster_id: c.id, length: len } }); if (!ok(r)) return toolErr(r, c, 'run an ad', true); const d = (r.json.data || [])[0] || {}; toast(d.message || `Ad started (${fmtDurLong(len)})`, { ms: 6000 }); })],
   ['summary', '/summary', 'A chat summary to copy or save for your mod team', 'any', (c) => summaryWin(c)],
+  ['remind', '/remind 5m what to do', 'Remind yourself later: 30s, 5m, 2h or 1h30m. /remind on its own lists them', 'any', (c, a) => remindCmd(c, a)],
   ['focus', '/focus', 'Turn Focus on or off: no pop-ups, extra sounds or moving effects', 'any', () => toggleFocus(true)],
   ['marker', '/marker [description]', 'Add a stream marker (channel owner)', 'owner', (c, a, rest) => askScope('channel:manage:broadcast', async () => { const r = await helix('streams/markers', { method: 'POST', body: { user_id: c.id, description: rest.join(' ').slice(0, 140) } }); ok(r) ? toast('Marker added at this point in the stream', { ms: 3000 }) : toolErr(r, c, 'add a marker (the channel needs to be live)', true); })]
 ];
@@ -130,8 +131,41 @@ function showCommandHelp(c) {
 }
 async function command(c, text) {
   const parts = text.slice(1).trim().split(/\s+/), name = (parts.shift() || '').toLowerCase(), hit = COMMANDS.find((x) => x[0] === name);
-  if (!hit) { const mc = typeof macros === 'function' && macros().find((m) => m.c && m.c === name && m.t); if (mc) return setTimeout(() => runMacro(mc), 0); } /* your own macro command, like /blob */
+  if (!hit) { const mc = typeof macros === 'function' && macros().find((m) => m.c && m.c === name && m.t); if (mc) return setTimeout(() => runMacro(mc), 0); } /* your own macro command */
   if (!hit) return err(`Unknown command: /${name}. Type /help to see what you can use.`);
   if (!cmdAllowed(c, hit[3])) return err(hit[3] === 'owner' ? `/${name} is only for the channel owner.` : `/${name} is for moderators. You are not a moderator in ${c.name}.`);
   try { await hit[4](c, parts, parts); } catch (e) { dbg(`/${name} broke: ${(e && e.stack) || e}`); err(`/${name} didn't work. Try again, and if it keeps happening let us know at yappy.chat/contact.`); }
+}
+
+/* ---------- /remind: a note to yourself that pops up later. Kept in your settings, so it still fires after a restart (late, if YappyChat was closed) ---------- */
+const REM_TIMERS = new Map();
+function remindDur(x) { const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i.exec(String(x || '')); if (!m || !(m[1] || m[2] || m[3])) return /^\d+$/.test(x || '') ? +x * 60000 : 0; return ((+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0)) * 1000; }
+const remindAt = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function remindCmd(c, a) {
+  const list = S.settings.reminders || [];
+  if (!a.length || a[0] === 'list') return notice(c, list.length ? 'Reminders: ' + list.map((r) => `${remindAt(r.at)} ${r.text}`).join(' · ') + '. /remind clear removes them.' : 'No reminders. Try /remind 5m check the giveaway.');
+  if (a[0] === 'clear') { list.forEach((r) => clearTimeout(REM_TIMERS.get(r.id))); saveSettings({ reminders: [] }); return toast('Reminders cleared', { ms: 2000 }); }
+  const ms = remindDur(a[0]), text = a.slice(1).join(' ').trim().slice(0, 200);
+  if (!ms || ms > 24 * 3600000 || !text) return err('Use it like /remind 5m check the giveaway (30s, 5m, 2h or 1h30m, up to 24 hours).');
+  const r = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: Date.now() + ms, text, chan: c.login };
+  saveSettings({ reminders: [...list, r] }); remindArm(r); toast(`Reminder set for ${remindAt(r.at)}`, { ms: 2500 }); if (c) notice(c, `Reminder set for ${remindAt(r.at)}: ${r.text}`);
+}
+function remindArm(r) { clearTimeout(REM_TIMERS.get(r.id)); REM_TIMERS.set(r.id, setTimeout(() => remindFire(r), Math.max(0, r.at - Date.now()))); }
+function remindFire(r) {
+  REM_TIMERS.delete(r.id); saveSettings({ reminders: (S.settings.reminders || []).filter((x) => x.id !== r.id) });
+  const late = Date.now() - r.at > 120000 ? ` (due at ${remindAt(r.at)})` : '', c = S.chats.get(r.chan);
+  toast(`⏰ ${r.text}${late}`, { ms: 15 * 60000, action: { label: 'Done', fn: () => {} } }); playSound('ping', 'mention', true);
+  if (c) notice(c, `Reminder: ${r.text}${late}`);
+  if (!document.hasFocus() && 'Notification' in window) { try { const n = new Notification('Reminder', { body: r.text, silent: true }); n.onclick = () => { window.focus(); n.close(); }; } catch (e) {} }
+}
+setTimeout(() => (S.settings.reminders || []).forEach(remindArm), 3000);
+
+// The clock in the channel bar: the same as /remind, without typing the command
+function openRemind(c, anchor) {
+  const list = S.settings.reminders || [];
+  const n = el('div', 'stack remindpop', `<h3>${ico('clock', 16)} Remind me</h3><input id="rm-t" placeholder="What to remember" maxlength="200"><div class="rmchips">${['5m', '10m', '30m', '1h', '2h'].map((d, i) => `<button type="button" class="chipbtn${i === 1 ? ' on' : ''}" data-d="${d}">${d.replace('m', ' min').replace('h', ' hr')}</button>`).join('')}</div><button class="btn primary" id="rm-go">Set reminder</button>${list.length ? `<div class="sl" style="margin-top:4px">Coming up</div>${list.slice().sort((a, b) => a.at - b.at).map((r) => `<div class="rmrow"><span>${esc(remindAt(r.at))}</span><b>${esc(r.text)}</b></div>`).join('')}` : ''}`);
+  popover(n, anchor, { toggle: true }); let d = '10m';
+  n.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { d = b.dataset.d; n.querySelectorAll('[data-d]').forEach((x) => x.classList.toggle('on', x === b)); }));
+  const go = () => { const t = $('#rm-t', n).value.trim(); if (!t) return $('#rm-t', n).focus(); closePop(); remindCmd(c, [d, ...t.split(/\s+/)]); };
+  $('#rm-go', n).onclick = go; $('#rm-t', n).onkeydown = (e) => { if (e.key === 'Enter') go(); }; setTimeout(() => $('#rm-t', n).focus(), 20);
 }

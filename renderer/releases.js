@@ -4,6 +4,14 @@
 // headed "Fixes in" instead of "What's new in"), items: [[title, text], ...] } with up to 10 items (a fixes release can list more).
 (function (root) {
 const RELEASES = [
+  { v: "1.0.1", date: "2026-11-25", items: [
+    ["Shared mod notes", "Pick Mod team when you write a note on a user card, and every moderator of that channel sees it. Notes stay private unless you choose to share them."],
+    ["Smooth in huge chats", "A burst of thousands of messages, like a big raid, no longer freezes the window. Chat catches up in the background while you keep moderating."],
+    ["Works on school and work networks", "YappyChat now follows Windows' proxy settings and trusted certificates, so it connects behind school or work networks and antivirus that scans secure connections."],
+    ["Recovers from graphics driver crashes", "If your graphics driver keeps crashing, YappyChat switches graphics acceleration off, restarts once and tells you. Turn it back on in Settings > General."],
+    ["Clearer install on older Windows", "The installer now says YappyChat needs Windows 10 or 11, instead of installing and then failing to open."],
+    ["Also in this version", "Whispers that work like a messaging app, nicknames on user cards, fewer pop-ups after a ban, a steadier chat connection, and a switch to turn off unread counts."]
+  ] },
   { v: "1.0.0", date: "2026-11-07", pin: "YappyChat 1.0: choose your seat at sign-in, every chat you moderate in one place, and a chat summary for your mod team.", items: [
     ["Choose your seat when you sign in", "Moderator, Streamer or Viewer, right on the sign-in screen. Twitch is only asked for what that seat uses, and the buttons and activity rail are set up to suit you. Whispers and channel-owner tools ask the first time you use them."],
     ["Stay signed in, update when you choose", "YappyChat no longer asks you to log in each day. New versions download in the background and wait in the top bar until you press Update ready. Inside, the app is more tightly sealed off, so only its own window can use its features."],
@@ -14,7 +22,7 @@ const RELEASES = [
     ["A chat summary for your mod team", "Mod tools > Summary (or /summary) writes a recap to paste into your team's Discord: how busy chat was, moderation totals for the whole team (no moderator is named), the most active chatters and the words behind bans and timeouts, with suggestions for blocked terms."],
     ["Focus, for busy streams", "The moon in the top bar (or Ctrl+Shift+D) quiets YappyChat: Yappy sits still, pop-ups wait in the rail, only urgent sounds play and name effects stop moving. The header is calmer too: a dot only shows while chat is connecting."],
     ["Streams your way", "Drag the divider between two chats and the streams resize to match. Minimised to the taskbar, streams keep playing; in the tray they pause. Emotes keep moving while a stream plays, and switching channel keeps its sound."],
-    ["Little things that add up", "Whispers stay after you close YappyChat. Give a macro its own command, like /blob. Spell check, fresh notification sounds, and bigger buttons with Compact layout off. A short note from the YappyChat team can appear in the top bar for known issues."]
+    ["Little things that add up", "Whispers stay after you close YappyChat. Give a macro its own command. Spell check, fresh notification sounds, and bigger buttons with Compact layout off. A short note from the YappyChat team can appear in the top bar for known issues."]
   ] },
   { v: "0.20.1", date: "2026-10-31", fixes: true, pin: "0.20.1 is out: pinning works, your own messages can be pinned and replied to, and clear reasons when Twitch refuses a message.", items: [
     ["Pinning works", "Pinning a message, timed pins and unpinning now work with Twitch. Your own messages can be pinned, replied to and deleted too, because chat is now sent the way Twitch recommends."],

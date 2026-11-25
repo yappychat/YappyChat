@@ -113,5 +113,5 @@ async function restoreSettings() {
 }
 
 /* ---------- Text size for one chat (split view): smaller, normal, larger ---------- */
-const CHAT_SIZES = [[0.85, 'Smaller'], [1, 'Normal'], [1.15, 'Larger']];
+const CHAT_SIZES = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3]; // three steps smaller and three larger; the middle is the normal size
 function applyChatSize(c) { if (!c || !c.view) return; const f = ((S.settings.chanStyle || {})[c.login] || {}).fs; if (f && f !== 1) c.view.style.setProperty('--cfs', f); else c.view.style.removeProperty('--cfs'); }

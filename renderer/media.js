@@ -2,15 +2,30 @@
 /* ---------- GIFs, pinned messages and drops in chat ----------
    GIFs: Twitch sends a `gifs` tag (start-end|id|url) with the message; the placeholder text is swapped for the picture, with an X to hide it.
    Pinned messages: a paid (Hype Chat) message carries its pin tags; for moderators a message pinned by a moderator is read from Twitch every
-   45 seconds. Either shows in a strip at the top of the chat with an X, and the message itself is marked in the list.
+   20 seconds (Twitch sends no event for it). Either shows in a strip at the top of the chat with an X, and the message itself is marked in the list.
    Drops: Twitch's gifted-drops notices are shown as their own line with an X. */
 function parseGifs(tag) {
   const out = [], rx = /(\d+)-(\d+)\|([^|,]*)\|(\S+?)(?=,\d+-\d+\||$)/g; let m; const t = unesc(String(tag || ''));
   while ((m = rx.exec(t))) if (/^https:\/\//i.test(m[4])) out.push({ s: +m[1], e: +m[2], id: m[3], url: m[4] });
   return out;
 }
+// GIFs older than 8 minutes stop moving: each is swapped for a still copy of its current frame, so a long chat full of GIFs doesn't keep
+// decoding them all. Pointing at one plays it again. (The still copy is only drawn on screen; nothing is read from it.)
+const GIF_STILL_MS = 8 * 60000;
+function freezeGifs() {
+  const now = Date.now();
+  document.querySelectorAll('.list .gif:not(.still):not(:hover)').forEach((g) => {
+    if (now - (+g.dataset.at || now) < GIF_STILL_MS) return; const img = g.querySelector('.gifimg'); if (!img || !img.complete || !img.naturalWidth) return;
+    const r = img.getBoundingClientRect(), w = Math.round(r.width) || img.naturalWidth, h = Math.round(r.height) || img.naturalHeight;
+    const cv = document.createElement('canvas'); cv.className = 'gifimg gifstill'; cv.width = img.naturalWidth; cv.height = img.naturalHeight; cv.style.width = w + 'px'; cv.style.height = h + 'px'; cv.dataset.tip = img.dataset.tip || '';
+    try { cv.getContext('2d').drawImage(img, 0, 0); } catch (e) { return; }
+    g._img = img; img.replaceWith(cv); g.classList.add('still');
+  });
+}
+setInterval(() => { if (!document.hidden) freezeGifs(); }, 60000);
+document.addEventListener('pointerover', (e) => { const g = e.target.closest && e.target.closest('.gif.still'); if (!g || !g._img) return; const cv = g.querySelector('.gifstill'); if (cv) cv.replaceWith(g._img); g.classList.remove('still'); g.dataset.at = Date.now() - GIF_STILL_MS + 30000; }); // plays again; it stops 30 seconds after you move away
 function gifHtml(t) {
-  return `<span class="gif"><img class="gifimg" src="${esc(t.url)}" alt="${esc(t.alt)}" data-tip="${esc(t.alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><button class="gifx" data-a="gifx" data-tip="Hide this GIF" aria-label="Hide this GIF">${ico('x', 11)}</button></span>`;
+  return `<span class="gif" data-at="${Date.now()}"><img class="gifimg" src="${esc(t.url)}" alt="${esc(t.alt)}" data-tip="${esc(t.alt)}" decoding="async" referrerpolicy="no-referrer"><button class="gifx" data-a="gifx" data-tip="Hide this GIF" aria-label="Hide this GIF">${ico('x', 11)}</button></span>`;
 }
 
 /* ----- pinned ----- */
@@ -38,7 +53,7 @@ function renderPins(c) {
   bar.classList.toggle('hidden', !p); if (!p) return;
   bar.classList.toggle('paid', p.kind === 'paid'); bar.classList.toggle('open', !!c.pinOpen); bar.setAttribute('aria-expanded', c.pinOpen ? 'true' : 'false'); bar.dataset.tip = c.pinOpen ? 'Click to fold' : 'Click to read the whole message';
   const left = p.until ? Math.max(0, Math.round((p.until - Date.now()) / 60000)) : 0;
-  bar.innerHTML = `<span class="pi">${ico('pin', 14)}</span><div class="pt">${p.name ? `<b>${esc(p.name)}</b> ` : ''}${esc(p.text || 'A message is pinned')}</div><span class="pgrow"></span>${p.kind === 'paid' && p.paid ? `<span class="pamt">${esc(paidAmount(p.paid))}</span>` : ''}${list.length > 1 ? `<span class="pmore">+${list.length - 1}</span>` : ''}${p.kind === 'mod' ? `<span class="pmore" data-tip="Pinned by a moderator">${p.by ? 'by ' + esc(p.by) : 'mod pin'}</span>` : ''}${left > 1 ? `<span class="pmore">${left} min</span>` : ''}${c.pinOpen ? `<button class="btn sm" data-a="pinjump">Show in chat</button>` : ''}${c.pinOpen && p.kind === 'mod' && (isMod(c) || isOwner(c)) ? `<button class="btn sm danger" data-a="unpin">Unpin</button>` : ''}<button class="ibtn sm" data-a="pinx" data-tip="Dismiss" aria-label="Dismiss the pinned message">${ico('x', 13)}</button>`;
+  bar.innerHTML = `<span class="pi">${ico('pin', 14)}</span><div class="pt">${p.name ? `<b>${unm(p.name, p.login)}</b> ` : ''}${esc(p.text || 'A message is pinned')}</div><span class="pgrow"></span>${p.kind === 'paid' && p.paid ? `<span class="pamt">${esc(paidAmount(p.paid))}</span>` : ''}${list.length > 1 ? `<span class="pmore">+${list.length - 1}</span>` : ''}${p.kind === 'mod' ? `<span class="pmore" data-tip="Pinned by a moderator">${p.by ? 'by ' + esc(p.by) : 'mod pin'}</span>` : ''}${left > 1 ? `<span class="pmore">${left} min</span>` : ''}${c.pinOpen ? `<button class="btn sm" data-a="pinjump">Show in chat</button>` : ''}${c.pinOpen && p.kind === 'mod' && (isMod(c) || isOwner(c)) ? `<button class="btn sm danger" data-a="unpin">Unpin</button>` : ''}<button class="ibtn sm" data-a="pinx" data-tip="Dismiss" aria-label="Dismiss the pinned message">${ico('x', 13)}</button>`;
 }
 function addPin(c, pin) {
   if (S.settings.pins === false) return; c.pins = c.pins || []; pin.at = Date.now();
@@ -52,22 +67,25 @@ function markPinned(c, id) {
 }
 // A message pinned by a moderator (Twitch's Get Pinned Chat Message). Needs the moderator permission you already granted; viewers who are not moderators can't ask.
 async function pollPins(c) {
-  if (!c || c.pinBusy || S.settings.pins === false || !chatLive(c) || !c.shown || !(isMod(c) || isOwner(c)) || (c.pinFail || 0) >= 3) return;
+  if (!c || c.pinBusy || S.settings.pins === false || !chatLive(c) || !c.shown || !(isMod(c) || isOwner(c)) || Date.now() < (c.pinNext || 0)) return;
   c.pinBusy = true;
+  // A failed check waits a little longer each time (up to 5 minutes, or 30 when Twitch says no permission) but never stops for good:
+  // Twitch often refuses while a channel is offline, and the pin made once the stream is live must still show up
+  const fail = (status) => { c.pinFail = (c.pinFail || 0) + 1; c.pinNext = Date.now() + (status === 401 || status === 403 ? 30 * 60000 : Math.min(5 * 60000, 20000 * 2 ** Math.min(c.pinFail, 4))); };
   try {
     const r = await helix('chat/pins', { query: mq(c) });
-    if (!ok(r)) { c.pinFail = (c.pinFail || 0) + 1; return; } c.pinFail = 0;
+    if (!ok(r)) return fail(r && r.status); c.pinFail = 0; c.pinNext = 0;
     const raw = r.json && r.json.data, d = Array.isArray(raw) ? raw[0] : raw; // one pinned message (or none)
     if (!d) { c.pins = (c.pins || []).filter((x) => x.kind !== 'mod'); markPinned(c, null); return renderPins(c); }
     const id = d.message_id || d.id || '', node = id && c.msgs.get(id), mm = d.message && typeof d.message === 'object' ? d.message : {};
     const name = d.user_name || d.sender_user_name || mm.user_name || (node && node.dataset.user) || '', text = (typeof d.message === 'string' ? d.message : mm.text) || d.text || (node ? msgText(node) : '');
     const by = d.pinned_by_user_name || d.moderator_user_name || (d.pinned_by && (d.pinned_by.user_name || d.pinned_by)) || '';
     c.pins = (c.pins || []).filter((x) => x.kind !== 'mod' || x.key === 'mod:' + id);
-    addPin(c, { key: 'mod:' + id, id, name, text, kind: 'mod', by: typeof by === 'string' ? by : '', until: d.ends_at || d.expires_at ? Date.parse(d.ends_at || d.expires_at) || 0 : 0 }); markPinned(c, id);
-  } catch (e) { c.pinFail = (c.pinFail || 0) + 1; } finally { c.pinBusy = false; }
+    addPin(c, { key: 'mod:' + id, id, name, login: d.sender_user_login || (node && node.dataset.user) || '', text, kind: 'mod', by: typeof by === 'string' ? by : '', until: d.ends_at || d.expires_at ? Date.parse(d.ends_at || d.expires_at) || 0 : 0 }); markPinned(c, id);
+  } catch (e) { fail(0); } finally { c.pinBusy = false; }
 }
 // Only chats you can see are checked, and nothing is checked while YappyChat is minimised or hidden (a pin is picked up as soon as you look again)
-setInterval(() => { if (document.hidden) return; S.chats.forEach((c) => { if (c.shown) pollPins(c); }); }, 45000);
+setInterval(() => { if (document.hidden) return; S.chats.forEach((c) => { if (c.shown) pollPins(c); }); }, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) S.chats.forEach((c) => { if (c.shown) pollPins(c); }); });
 setInterval(() => !document.hidden && S.chats.forEach((c) => { if (c.shown && c.pins && c.pins.length) renderPins(c); }), 20000); // expired pins fall away
 

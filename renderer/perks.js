@@ -198,14 +198,18 @@
   // Once a day (unless switched off in Settings > Account): "this person opened YappyChat", with the version and the anonymous usage statistics from usage.js. The server keeps them against a salted hash of the Twitch id.
   async function ping() {
     const today = new Date().toISOString().slice(0, 10);
+    if (S.token && S.settings.installedAt && !S.settings.signedInAt) saveSettings({ signedInAt: Date.now() }); // the first time a new install is signed in
     if (!apiOn() || !S.token || S.settings.sharePing === false || S.settings.lastPing === today) return;
     try { const v = await cg.version(), r = await cg.http({ url: API_URL + '/api/ping', method: 'POST', headers: { Authorization: 'Bearer ' + S.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ v, s: window.Usage ? Usage.snapshot() : undefined, u: window.Usage ? Usage.take() : undefined }) }); if (r.status === 200) { saveSettings({ lastPing: today }); if (window.Usage) Usage.clear(); } } catch (x) {}
   }
   // A new install's first launch, before anyone signs in: the server adds one to today's total and keeps nothing else (no id, no address). Once per install.
   async function hello() {
-    if (!apiOn() || S.settings.helloSent || S.settings.sharePing === false) return;
+    if (S.settings.helloSent) return;
     if (S.settings.seenVersion || S.settings.lastPing || S.settings.tourDone) return saveSettings({ helloSent: 1 }); // an install from before 1.0 isn't new
-    try { const r = await cg.http({ url: API_URL + '/api/hello', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (r.status === 200) saveSettings({ helloSent: 1 }); } catch (x) {}
+    if (!S.settings.installedAt) saveSettings({ installedAt: Date.now() }); // kept on this PC: for "how long until signed in" and "settings changed in the first week"
+    if (!apiOn() || S.settings.sharePing === false) return;
+    let inst = 0; try { inst = (cg.installTime && (await cg.installTime())) || 0; } catch (x) {} // how long the installer took, in seconds (the server only adds one to a range)
+    try { const r = await cg.http({ url: API_URL + '/api/hello', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(inst ? { inst } : {}) }); if (r.status === 200) saveSettings({ helloSent: 1 }); } catch (x) {}
   }
   // Save what I'm wearing to the supporter server (it checks my Twitch login and that I own each item)
   let pushT = 0;
@@ -251,7 +255,7 @@
   // ----- "Your Perks": choose what you wear from what you own -----
   function selectorHtml() {
     const m = mine();
-    const stale = entStale() ? `<div class="yp-stale" role="status">${ico('reload', 13)} Reconnecting to the supporter server. Your perks keep working meanwhile.</div>` : '';
+    const stale = entStale() && S.settings.entCache && S.settings.entCache.data && entState.at ? `<div class="yp-stale" role="status">${ico('reload', 13)} Reconnecting to the supporter server. Your perks keep working meanwhile.</div>` : '';
     if (!m) return stale + `<div class="none">Perks are coming soon. If you'd like to support YappyChat in the meantime, you can send a tip.</div><div class="btnrow"><button class="btn primary" id="yp-shop">${ico('heart', 15)} Support Yappy</button><button class="btn" id="yp-refresh">${ico('reload', 14)} I just bought something: check again</button></div>`;
     const eq = m.eq, chip = (cat, id, label, on, own) => `<button class="chipbtn${on ? ' on' : ''}${own ? '' : ' locked'}" data-cat="${cat}" data-id="${id}" ${own ? '' : 'disabled data-tip="Not owned yet"'}>${e(label)}</button>`;
     const sectionName = (id) => { const h = id.slice(3); return HOL[h] ? HOL[h][0] + ' ' : ''; };

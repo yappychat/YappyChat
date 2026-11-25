@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('cg', {
   playerSignIn: () => ipcRenderer.invoke('player:signin'),
   playerSignOut: () => ipcRenderer.invoke('player:signout'),
   version: () => ipcRenderer.invoke('app:version'),
+  installTime: () => ipcRenderer.invoke('app:installTime'),
+  viewerCard: (channel, login) => ipcRenderer.invoke('twitch:viewercard', channel, login),
   videoInfo: () => ipcRenderer.invoke('app:video'),
   startFresh: () => ipcRenderer.invoke('app:fresh'),
   checkUpdate: () => ipcRenderer.invoke('update:check'),

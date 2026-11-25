@@ -5,8 +5,14 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const path = require('path');
+const { emojiText } = require('./emojitext'); // chat logs keep emoji as short text, like :fire:
+const { playerPage } = require('./playerpage');
+const updateHold = require('./updatehold');
 const http = require('http');
 const fs = require('fs');
+// Network calls go through Chromium's own network stack (net.fetch), not Node's fetch. It follows Windows' proxy settings and trusts the certificates Windows trusts,
+// which is what school and work networks, and antivirus programs that scan secure connections, rely on. Node's fetch does neither, and fails there.
+const netFetch = (url, opts) => { try { const { net } = require('electron'); if (net && typeof net.fetch === 'function') return net.fetch(url, { credentials: 'omit', cache: 'no-store', ...opts }); } catch (e) {} return fetch(url, opts); }; // no cookies and no caching, as with Node's fetch
 // Only YappyChat's own page may use the bridge to this process (it holds the Twitch token). Every message is checked against the page that sent it,
 // so a page that somehow got into the window (or a frame inside it) can't ask for anything.
 const APP_PAGE = path.join(__dirname, 'renderer', 'index.html');
@@ -91,11 +97,20 @@ process.on('uncaughtException', (e) => {
 });
 process.on('unhandledRejection', (e) => diag('main-rejection', e));
 app.on('render-process-gone', (e, wc, d) => { diag('renderer-gone', d && d.reason + ' ' + d.exitCode); if (d && d.reason !== 'clean-exit') queueCrash('renderer', { message: 'Window process ended: ' + d.reason + ' (' + d.exitCode + ')' }); });
-app.on('child-process-gone', (e, d) => { if (d && d.reason !== 'clean-exit') diag('child-gone', d.type + ' ' + d.reason + ' ' + d.exitCode); });
+// A graphics driver that keeps crashing: after 3 GPU crashes within 2 minutes, graphics acceleration is switched off and YappyChat restarts once, so it opens instead of
+// flickering or closing. The window says so on the next start, and Settings > General turns it back on.
+const gpuCrashes = [];
+function gpuFallback() {
+  try { const st = load(); if (st.hwAccel === 'off') return; st.hwAccel = 'off'; st.hwAccelAuto = 1; save(st, true); diag('gpu-fallback', 'graphics acceleration switched off after repeated GPU crashes'); app.relaunch(); app.exit(0); } catch (e) { diag('gpu-fallback', e); }
+}
+app.on('child-process-gone', (e, d) => {
+  if (d && d.reason !== 'clean-exit') diag('child-gone', d.type + ' ' + d.reason + ' ' + d.exitCode);
+  if (d && d.type === 'GPU' && d.reason !== 'clean-exit') { const now = Date.now(); gpuCrashes.push(now); while (gpuCrashes.length && now - gpuCrashes[0] > 120000) gpuCrashes.shift(); if (gpuCrashes.length >= 3) gpuFallback(); }
+});
 async function sendPendingCrash() {
   const f = pendingCrash(); if (!fs.existsSync(f)) return;
   const st = load(); if (st.crashReports === false || !siteOn()) return; // switched off, or no site to send to: it stays on disk only
-  try { const body = fs.readFileSync(f, 'utf8'); const r = await fetch(CONFIG.siteUrl + '/api/crash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(10000) }); if (r.ok || r.status === 400) fs.rmSync(f, { force: true }); } catch (e) {}
+  try { const body = fs.readFileSync(f, 'utf8'); const r = await netFetch(CONFIG.siteUrl + '/api/crash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(10000) }); if (r.ok || r.status === 400) fs.rmSync(f, { force: true }); } catch (e) {}
 }
 
 // ---------- Settings: kept in memory, written atomically (a crash mid-write can never leave a half-written file) ----------
@@ -122,13 +137,15 @@ function flushSettings() {
 const save = (s, now) => { settingsCache = s; if (now) return flushSettings(); if (!saveT) saveT = setTimeout(flushSettings, 400); };
 app.on('will-quit', flushSettings);
 // Name history. Twitch accounts keep the same ID when they change name, so the name last seen for each ID is kept in names.json.
-// When an ID turns up with a new name, the old one is added to its history. Only IDs seen in chat are kept, and the least recently seen go first past 120,000.
+// When an ID turns up with a new name, the old one is added to its history. Only IDs seen in chat are kept, for as long as chat logs are kept, and the least recently seen go first past 120,000.
 const namesFile = () => path.join(app.getPath('userData'), 'names.json');
 let names = null, namesT = 0;
 const loadNames = () => { if (names) return names; try { names = JSON.parse(fs.readFileSync(namesFile(), 'utf8')); } catch (e) { names = {}; } if (!names.cur) names = { cur: {}, past: {} }; return names; };
 function flushNames() {
   clearTimeout(namesT); namesT = 0; if (!names) return;
   try {
+    // Kept only as long as chat logs (a year when logs are kept for always): names not seen in chat since then are forgotten
+    const keepDays = +load().logKeepDays || 365, oldest = Date.now() / 864e5 - keepDays; for (const id of Object.keys(names.cur)) if (names.cur[id][1] < oldest) { delete names.cur[id]; delete names.past[id]; }
     const ids = Object.keys(names.cur); if (ids.length > 120000) { ids.sort((a, b) => names.cur[a][1] - names.cur[b][1]).slice(0, ids.length - 100000).forEach((id) => { delete names.cur[id]; delete names.past[id]; }); }
     const f = namesFile(), tmp = f + '.tmp'; fs.mkdirSync(app.getPath('userData'), { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(names)); fs.renameSync(tmp, f);
   } catch (e) { diag('names-write', e); }
@@ -140,7 +157,7 @@ ipcMain.handle('whispers:load', (e, owner) => { try { const d = JSON.parse(fs.re
 ipcMain.handle('whispers:save', (e, owner, threads) => {
   try {
     if (!/^\d{1,20}$/.test(String(owner)) || !Array.isArray(threads)) return false;
-    const clean = threads.slice(0, 100).map((t) => ({ uid: String(t.uid).slice(0, 20), login: String(t.login || '').slice(0, 25), name: String(t.name || '').slice(0, 40), last: +t.last || 0,
+    const clean = threads.slice(0, 100).map((t) => ({ uid: String(t.uid).slice(0, 20), login: String(t.login || '').slice(0, 25), name: String(t.name || '').slice(0, 40), last: +t.last || 0, unread: Math.min(99, +t.unread || 0), avatar: /^https:\/\/static-cdn\.jtvnw\.net\//.test(String(t.avatar || '')) ? String(t.avatar).slice(0, 300) : '',
       msgs: (Array.isArray(t.msgs) ? t.msgs : []).slice(-200).map((m) => ({ text: String(m.text || '').slice(0, 600), me: !!m.me, ts: +m.ts || 0 })) }));
     const f = whispersFile(), tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ owner: String(owner), threads: clean })); fs.renameSync(tmp, f); return true;
   } catch (x) { diag('whispers-write', x); return false; }
@@ -247,7 +264,7 @@ async function refreshTok(force) {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const r = await fetch('https://id.twitch.tv/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: t.c, grant_type: 'refresh_token', refresh_token: t.r }), signal: AbortSignal.timeout(15000) });
+      const r = await netFetch('https://id.twitch.tv/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: t.c, grant_type: 'refresh_token', refresh_token: t.r }), signal: AbortSignal.timeout(15000) });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.access_token) { writeTok({ a: j.access_token, r: j.refresh_token || t.r, x: Date.now() + (j.expires_in || 14400) * 1000, c: t.c }); lastRenew = 'new'; return j.access_token; }
       // Only an answer that says the refresh token itself is no good ends the login. Rate limits, a busy Twitch or a hiccup keep it, so the next try can work.
@@ -276,7 +293,7 @@ ipcMain.handle('auth:device', async (e, scopes, opts = {}) => {
   const run = ++deviceRun; let closedEarly = false;
   const closeAuth = () => { const w = authWin; authWin = null; try { if (w && !w.isDestroyed()) w.close(); } catch (x) {} };
   try {
-    const r = await fetch('https://id.twitch.tv/oauth2/device', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: cid, scopes: (scopes || []).join(' ') }), signal: AbortSignal.timeout(15000) });
+    const r = await netFetch('https://id.twitch.tv/oauth2/device', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: cid, scopes: (scopes || []).join(' ') }), signal: AbortSignal.timeout(15000) });
     const d = await r.json().catch(() => ({})); if (!r.ok || !d.device_code) return { error: 'Twitch did not start the login. Please try again in a moment.' };
     // The link Twitch gives already holds the code, so the person only has to press Authorize on twitch.tv: in a YappyChat window (the default), or their browser.
     let uri = String(d.verification_uri || ''); if (/^https:\/\/(www\.)?twitch\.tv\//.test(uri) && !/device-code=/.test(uri)) uri += (uri.includes('?') ? '&' : '?') + 'device-code=' + encodeURIComponent(d.user_code);
@@ -288,7 +305,7 @@ ipcMain.handle('auth:device', async (e, scopes, opts = {}) => {
     const until = Date.now() + (d.expires_in || 1800) * 1000; let wait = Math.max(5, d.interval || 5) * 1000;
     while (Date.now() < until) {
       await new Promise((ok) => setTimeout(ok, wait)); if (run !== deviceRun) { if (!closedEarly) closeAuth(); return { error: closedEarly ? 'The Twitch window was closed before you pressed Authorize.' : 'Login was cancelled.' }; }
-      const t = await fetch('https://id.twitch.tv/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: cid, scopes: (scopes || []).join(' '), device_code: d.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }), signal: AbortSignal.timeout(15000) }).catch(() => null);
+      const t = await netFetch('https://id.twitch.tv/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: cid, scopes: (scopes || []).join(' '), device_code: d.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }), signal: AbortSignal.timeout(15000) }).catch(() => null);
       if (!t) continue; // network blip: keep waiting
       const j = await t.json().catch(() => ({}));
       if (t.ok && j.access_token) { closeAuth(); if (!writeTok({ a: j.access_token, r: j.refresh_token, x: Date.now() + (j.expires_in || 14400) * 1000, c: cid })) return { error: 'Windows could not protect the login on this computer, so it was not saved.' }; return { token: j.access_token }; }
@@ -313,7 +330,7 @@ ipcMain.handle('http', async (e, o) => {
   if (!httpOk(url)) return { status: 0, error: 'blocked' };
   if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return { status: 0, error: 'blocked' };
   try {
-    const r = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(Math.min(Math.max(+timeout || 15000, 2000), 60000)) });
+    const r = await netFetch(url, { method, headers, body, signal: AbortSignal.timeout(Math.min(Math.max(+timeout || 15000, 2000), 60000)) });
     const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch {}
     const h = {}; KEEP_HEADERS.forEach((k) => { const v = r.headers.get(k); if (v != null) h[k] = v; });
     return { status: r.status, json: j, headers: h };
@@ -334,7 +351,7 @@ ipcMain.on('log', (e, { channel, line }) => {
   if (!/^\w+$/.test(channel)) return;
   const d = path.join(logsDir(), channel);
   fs.mkdirSync(d, { recursive: true });
-  fs.appendFile(path.join(d, new Date().toISOString().slice(0, 10) + '.log'), line + '\n', () => {});
+  fs.appendFile(path.join(d, new Date().toISOString().slice(0, 10) + '.log'), emojiText(String(line)) + '\n', () => {});
 });
 const madeDirs = new Set();
 ipcMain.on('log:batch', (e, batch) => {
@@ -342,7 +359,7 @@ ipcMain.on('log:batch', (e, batch) => {
   for (const b of batch.slice(0, 60)) {
     if (!b || !/^\w+$/.test(b.channel) || !Array.isArray(b.lines) || !b.lines.length) continue;
     const d = path.join(logsDir(), b.channel); if (!madeDirs.has(d)) { fs.mkdirSync(d, { recursive: true }); madeDirs.add(d); }
-    fs.appendFile(path.join(d, day + '.log'), b.lines.slice(0, 2000).map((x) => String(x).slice(0, 1200)).join('\n') + '\n', () => {});
+    fs.appendFile(path.join(d, day + '.log'), b.lines.slice(0, 2000).map((x) => emojiText(String(x).slice(0, 1200))).join('\n') + '\n', () => {});
   }
 });
 // Search the saved chat logs (newest 30 days per channel), for the cross-channel search
@@ -428,6 +445,16 @@ ipcMain.handle('settings:import', async () => {
 });
 
 ipcMain.handle('app:version', () => app.getVersion());
+// How long the installer took on a brand-new install, read from Windows' file creation times: the install folder is made when the installer
+// starts and the uninstaller is written as it finishes. Only for a folder made in the last day (a fresh install); nothing else is read.
+ipcMain.handle('app:installTime', async () => {
+  if (!app.isPackaged || process.platform !== 'win32') return 0;
+  try {
+    const dir = path.dirname(process.execPath), start = (await fs.promises.stat(dir)).birthtimeMs; if (!start || Date.now() - start > 864e5) return 0;
+    const end = Math.max(...(await Promise.all(['Uninstall YappyChat.exe', path.join('resources', 'app.asar')].map((f) => fs.promises.stat(path.join(dir, f)).then((x) => x.birthtimeMs).catch(() => 0)))));
+    const sec = (end - start) / 1000; return sec > 0 && sec < 3600 ? Math.round(sec) : 0;
+  } catch (e) { return 0; }
+});
 // What Chromium decided about video decoding on this PC (Settings > General > Check video decoding). Nothing here is sent anywhere.
 ipcMain.handle('app:video', async () => {
   const out = { chromium: process.versions.chrome, electron: process.versions.electron, status: {}, devices: [] };
@@ -452,16 +479,11 @@ ipcMain.on('capture:hide', (e, on) => { try { if (win && !win.isDestroyed()) win
 // A mod's /alert: bring the window forward and flash the taskbar button until it is looked at
 // The stream player is Twitch's own page in a frame inside our player webview, so only this side can reach it. Three fixed actions, nothing else:
 // read whether it is muted or paused (so a channel switch keeps your sound), and pause or play it (the tray)
-const PLAYER_JS = {
-  state: '(() => { const v = document.querySelector("video"); return v ? { muted: v.muted || v.volume === 0, paused: v.paused } : null; })()',
-  // Pausing for the tray holds: Twitch's player tends to start a live stream again by itself, so while held any attempt to play is stopped, and the sound is muted as a backstop.
-  pause: '(() => { const v = document.querySelector("video"); if (!v) return false; window.__ycHold = true; if (!window.__ycHoldOn) { window.__ycHoldOn = 1; document.addEventListener("play", (e) => { if (window.__ycHold && e.target && e.target.pause) { e.target.pause(); } }, true); document.addEventListener("playing", (e) => { if (window.__ycHold && e.target && e.target.pause) e.target.pause(); }, true); } if (!v.muted && window.__ycMuted === undefined) { window.__ycMuted = false; v.muted = true; } else if (window.__ycMuted === undefined) window.__ycMuted = true; if (v.paused) return false; v.pause(); return true; })()',
-  release: '(() => { window.__ycHold = false; const v = document.querySelector("video"); if (v && window.__ycMuted === false) v.muted = false; window.__ycMuted = undefined; return true; })()',
-  play: '(() => { window.__ycHold = false; const v = document.querySelector("video"); if (v && window.__ycMuted === false) v.muted = false; window.__ycMuted = undefined; if (v) v.play().catch(() => {}); return true; })()'
-};
+// Pause, play and read the stream player through our own player page's ycCtl (Twitch's documented embed calls); see playerpage.js
+const PLAYER_JS = Object.fromEntries(['state', 'pause', 'release', 'play'].map((a) => [a, `window.ycCtl ? window.ycCtl('${a}') : null`]));
 ipcMain.handle('player:ctl', async (e, id, act) => {
   try { const wc = webContents.fromId(+id), code = PLAYER_JS[act]; if (!wc || !code || !win || wc.hostWebContents !== win.webContents) return null;
-    const f = wc.mainFrame.framesInSubtree.find((fr) => /^https:\/\/player\.twitch\.tv\//.test(fr.url)); return f ? await f.executeJavaScript(code) : null; } catch (x) { return null; }
+    return await wc.mainFrame.executeJavaScript(code); } catch (x) { return null; } // our own player page, never Twitch's frame
 });
 ipcMain.on('alert:flash', () => { try { if (!win || win.isDestroyed()) return; if (!win.isVisible()) showWin(); win.flashFrame(true); if (win.isMinimized()) win.restore(); } catch (x) {} });
 ipcMain.on('alert:stop', () => { try { if (win && !win.isDestroyed()) win.flashFrame(false); } catch (x) {} });
@@ -469,18 +491,20 @@ ipcMain.on('alert:stop', () => { try { if (win && !win.isDestroyed()) win.flashF
 ipcMain.on('power:stream', (e, on) => { try { if (win && !win.isDestroyed()) win.webContents.setBackgroundThrottling(!on); } catch (x) {} });
 
 // Live updates: the installed app checks GitHub Releases, downloads in the background, then offers a restart
-let updater = null, lastUpdate = null;
+let updater = null, lastUpdate = null, hold = null;
 const sendUpdate = (state, extra = {}) => { lastUpdate = { state, at: Date.now(), ...extra }; if (win && !win.isDestroyed()) win.webContents.send('update', lastUpdate); };
 // Asked by the window once it has loaded (an answer sent while the window was still starting would be lost), on launch, every few hours and when you come back to the app.
 ipcMain.handle('update:check', () => { if (!updater) return sendUpdate('error', { message: 'Updates only work in the installed app.' }); if (lastUpdate && lastUpdate.state === 'downloaded') return sendUpdate('downloaded', { version: lastUpdate.version }); if (lastUpdate && lastUpdate.state === 'checking' && Date.now() - lastUpdate.at < 60000) return sendUpdate('checking'); /* the launch check is still running: the window was not ready to hear it start */ if (lastUpdate && (lastUpdate.state === 'none' || lastUpdate.state === 'available') && Date.now() - lastUpdate.at < 120000) return sendUpdate(lastUpdate.state, { version: lastUpdate.version }); /* the check that ran as the app started already answered */ return updater.checkForUpdates().catch(() => {}); });
-ipcMain.handle('update:install', () => updater && updater.quitAndInstall());
+ipcMain.handle('update:install', () => (hold ? hold.install() : updater && updater.quitAndInstall()));
 function setupUpdater() {
   if (!app.isPackaged) return;
   updater = require('electron-updater').autoUpdater;
   updater.allowPrerelease = false; // only full releases: a GitHub pre-release never reaches people
   updater.autoInstallOnAppQuit = false; // an update downloads in the background and waits in the top bar; it installs only when you press Update ready · restart
   updater.on('checking-for-update', () => { if (!lastUpdate || !['available', 'downloaded'].includes(lastUpdate.state)) sendUpdate('checking'); });
-  updater.on('update-available', (i) => sendUpdate('available', { version: i.version }));
+  // Releases can be held back from the admin page: see updatehold.js
+  hold = updateHold.wire({ updater, sendUpdate, getLast: () => lastUpdate, diag,
+    getHold: async () => { const r = await netFetch(CONFIG.siteUrl + '/api/flags?t=' + Math.floor(Date.now() / 60000), { signal: AbortSignal.timeout(6000) }); return r.ok ? ((await r.json()).hold || '') : ''; } });
   updater.on('update-not-available', () => sendUpdate('none'));
   updater.on('update-downloaded', (i) => sendUpdate('downloaded', { version: i.version }));
   updater.on('error', (e) => { diag('updater', String((e && e.message) || e).split('\nHeaders:')[0].slice(0, 400)); /* the server's response headers (cookies and the like) are left out */ sendUpdate('error', { message: 'The update could not be downloaded. YappyChat will try again later; you can keep using this version.' }); });
@@ -496,8 +520,8 @@ function ensurePlayerServer() {
     const srv = http.createServer((req, rsp) => {
       const u = new URL(req.url, 'http://localhost'), ch = u.searchParams.get('channel') || '', mu = u.searchParams.get('muted') === '1';
       if (u.pathname !== '/player' || !/^\w{3,25}$/.test(ch)) { rsp.writeHead(404); return rsp.end(); }
-      rsp.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      rsp.end(`<!doctype html><html><body style="margin:0;background:#000;overflow:hidden"><iframe src="https://player.twitch.tv/?channel=${ch}&parent=localhost&muted=${mu}" style="border:0;position:fixed;inset:0;width:100%;height:100%" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></body></html>`);
+      const pg = playerPage(ch, 'localhost', mu); rsp.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': pg.csp });
+      rsp.end(pg.html);
     });
     srv.listen(0, 'localhost', () => { playerPort = srv.address().port; resolve(playerPort); });
   });
@@ -533,6 +557,13 @@ function twitchWindow(url, what) {
   w.webContents.on('did-navigate', (e, u) => showHost(u)); w.webContents.on('did-navigate-in-page', (e, u) => showHost(u));
   w.loadURL(url); return w;
 }
+// Twitch's own viewer card for one person in one channel (for mods it holds their full message history there). Signed in with the stream player's sign-in.
+const vcWins = new Map();
+ipcMain.handle('twitch:viewercard', (e, channel, login) => {
+  channel = String(channel || '').toLowerCase(); login = String(login || '').toLowerCase(); if (!/^\w{1,25}$/.test(channel) || !/^\w{1,25}$/.test(login)) return false;
+  const k = channel + '/' + login, old = vcWins.get(k); if (old && !old.isDestroyed()) { old.focus(); return true; }
+  const w = twitchWindow(`https://www.twitch.tv/popout/${channel}/viewercard/${login}`, `${login} in ${channel}`); w.setSize(380, 640); vcWins.set(k, w); w.on('closed', () => vcWins.delete(k)); return true;
+});
 let plWin = null;
 ipcMain.handle('player:signin', () => new Promise((resolve) => {
   if (plWin && !plWin.isDestroyed()) { plWin.focus(); return resolve(false); }

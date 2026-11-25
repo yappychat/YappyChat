@@ -5,7 +5,7 @@
 async function pinNow(c, id, dur) {
   // Twitch's Pin Chat Message: PUT /helix/chat/pins with the message and length in the address, no body (length in seconds; none = until the stream ends)
   const r = await helix('chat/pins', { method: 'PUT', query: mq(c, { message_id: id, ...(dur ? { duration_seconds: String(dur) } : {}) }) }); if (!ok(r)) return toolErr(r, c, 'pin a message', false);
-  toast('Message pinned', { ms: 2500 }); logAct(c, 'mode', 'You pinned a message'); setTimeout(() => pollPins(c), 800);
+  toast('Message pinned', { ms: 2500 }); logAct(c, 'mode', 'You pinned a message'); c.pinNext = 0; setTimeout(() => pollPins(c), 800);
 }
 // /pin your message: sends it as you, then pins it (optionally /pin 5m your message; 30s to 30m, otherwise until the stream ends)
 async function sendAndPin(c, text, dur) {

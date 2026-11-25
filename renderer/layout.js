@@ -22,9 +22,9 @@ async function addChannel(raw, select = true) {
   c.list.onscroll = () => {
     const gap = c.list.scrollHeight - c.list.scrollTop - c.list.clientHeight, now = Date.now(), byUser = c.uDrag || now - (c.uScroll || 0) < 500 || now - (S.uiAt || 0) < 700;
     if (c.stick && gap >= 40 && !byUser) { stickScroll(c); return; }
-    c.stick = gap < 40; if (c.stick) mentionPillCheck(c); if (c.stick && !c.hover) { c.held = 0; c.resume.classList.add('hidden'); } else if (!c.stick) { c.resume.textContent = c.held ? `Paused · ${c.held} new` : 'Jump to latest'; c.resume.classList.remove('hidden'); } };
+    c.stick = gap < 40; c.list.classList.toggle('up', !c.stick); if (c.stick) mentionPillCheck(c); if (c.stick && !c.hover) { if (c.heldNodes) { flushHeld(c); stickScroll(c); } c.held = 0; c.resume.classList.add('hidden'); } else if (!c.stick) { c.resume.textContent = c.held ? `Paused · ${c.held} new` : 'Jump to latest'; c.resume.classList.remove('hidden'); } };
   c.list.onmouseenter = () => { c.hover = true; }; c.list.onmouseleave = () => { c.hover = false; flushHeld(c); if (c.stick) { c.list.scrollTop = c.list.scrollHeight; } c.held = 0; if (c.stick) c.resume.classList.add('hidden'); };
-  c.resume.onclick = () => { flushHeld(c); c.stick = true; c.held = 0; c.list.scrollTop = c.list.scrollHeight; c.resume.classList.add('hidden'); };
+  c.resume.onclick = () => { c.stick = true; c.list.classList.remove('up'); flushHeld(c); c.held = 0; c.list.scrollTop = c.list.scrollHeight; c.resume.classList.add('hidden'); };
   c.list.onclick = (e) => onListClick(c, e);
   c.sbar.querySelector('input').oninput = (e) => { c.search = e.target.value.trim().toLowerCase(); runSearch(c); };
   c.sbar.querySelector('input').onkeydown = (e) => { if (e.key === 'Escape') toggleSearch(c); };
@@ -93,6 +93,7 @@ function statVal(c, k) {
     case 'viewers': return live && live.viewers != null ? live.viewers.toLocaleString() : '–';
     case 'live': return live && live.started ? fmtClock(Date.now() - new Date(live.started)) : '–';
     case 'games': return c.games.length;
+    case 'bans': case 'timeouts': case 'deletes': case 'warns': return (c.stat.team && c.stat.team[k]) || 0;
     default: return c.stat[k];
   }
 }
@@ -114,18 +115,19 @@ function renderStats() {
   const hstats = STAT_DEFS.filter(([k, , d]) => HEAD.includes(k) && statOn(k, d)).map(([k, l]) => stat1(k, l)).join('');
   const stats = nm ? '' : STAT_DEFS.filter(([k, , d]) => !HEAD.includes(k) && statOn(k, d)).map(([k, l]) => `<span class="stat"${k === 'games' && c.games.length ? ` data-tip="${esc(c.games.map((g) => g.game).join(' → '))}"` : STAT_TIP[k] ? ` data-tip="${STAT_TIP[k]}"` : ''}>${esc(l)} <b data-st="${k}">${statVal(c, k)}</b></span>`).join('');
   bar.classList.remove('hidden'); const cc = chanColor(c.login); if (cc) bar.style.setProperty('--cc', cc); else bar.style.removeProperty('--cc'); bar.classList.toggle('hascc', !!cc);
-  bar.innerHTML = `<div class="srows"><div class="srow1"><div class="chan"><img${cc ? ' class="ring"' : ''} src="${esc(c.avatar)}" alt=""><span class="conndot"></span><b>${esc(c.name)}</b>${withHtml(c)}${live ? '<span class="livepill" data-tip="Live now">LIVE</span>' : ''}</div>` +
-    (live ? `<div class="smeta"><span class="stitle" data-tip="${esc(live.title || '')}">${esc(live.title || '')}</span>${live.game ? ` <i class="dot">·</i> <a href="#" class="gamelink" data-url="${esc(gameUrl(live.game))}" data-tip="Browse ${esc(live.game)} on Twitch">${esc(live.game)}</a>` : ''}${pen}</div>` : `<div class="smeta faint">Offline${pen}</div>`) +
-    `<div class="chips">${chips.map(([x, tip]) => `<span class="chip" data-tip="${esc(tip)}">${esc(x)}</span>`).join('')}</div></div>` +
+  bar.innerHTML = `<div class="srows"><div class="srow1"><div class="chan"><img${cc ? ' class="ring"' : ''} src="${esc(c.avatar)}" alt=""><span class="conndot"></span><b data-tip="Open ${esc(c.name)} on Twitch">${esc(c.name)}</b>${withHtml(c)}${live ? '<span class="livepill" data-tip="Live now">LIVE</span>' : ''}</div>` +
+    (live ? `<div class="smeta"><span class="stitle" data-tip="${esc(live.title || '')}${live.title ? '. ' : ''}Click to open the channel on Twitch">${esc(live.title || '')}</span>${live.game ? ` <i class="dot">·</i> <a href="#" class="gamelink" data-url="${esc(gameUrl(live.game))}" data-tip="Browse ${esc(live.game)} on Twitch">${esc(live.game)}</a>` : ''}${pen}</div>` : `<div class="smeta faint">Offline${pen}</div>`) +
+    `</div>` +
     (hstats || stats ? `<div class="srow2">${hstats ? `<div class="hstats">${hstats}</div>` : ''}${stats ? `<span class="lbl">This session</span><button id="sessTog" class="ibtn sm sessTog${S.settings.sessHide ? ' closed' : ''}" data-tip="${S.settings.sessHide ? 'Show the session counters' : 'Hide the session counters'}" aria-label="Toggle session counters">${ico('chev', 14)}</button>${S.settings.sessHide ? '' : stats}` : ''}</div>` : '') + '</div>' +
-    (nm ? '' : `<div class="sact"><button id="notesBtn" class="ibtn" data-tip="Notes and rules for this channel" aria-label="Notes and rules">${ico('book', 17)}</button>${modKnown(c) || isOwner(c) ? `<button id="guardBtn" class="btn primary">${ico('shield', 15)} Shield</button>` : ''}</div>`);
+    (chips.length ? `<div class="chips">${chips.map(([x, tip]) => `<span class="chip" data-tip="${esc(tip)}">${esc(x)}</span>`).join('')}</div>` : '') + // beside the buttons, centred in the bar; several wrap onto a second line
+    `<div class="sact"><button id="remindBtn" class="ibtn" data-tip="Remind me later" aria-label="Remind me later">${ico('clock', 17)}</button>${nm ? '' : `<button id="notesBtn" class="ibtn" data-tip="Notes and rules for this channel" aria-label="Notes and rules">${ico('book', 17)}</button>${modKnown(c) || isOwner(c) ? `<button id="guardBtn" class="ibtn shieldb${c.shield ? ' on' : ''}" data-tip="${c.shield ? 'Shield Mode is on. ' : ''}Shield: quick protection for raids and spam" aria-label="Shield">${ico('shield', 18)}</button>` : ''}`}</div>`;
   const st = $('#sessTog'); if (st) st.onclick = () => { saveSettings({ sessHide: !S.settings.sessHide }); renderStats(); };
-  if ($('#guardBtn')) $('#guardBtn').onclick = (e) => openGuard(c, e.currentTarget); if ($('#notesBtn')) $('#notesBtn').onclick = (e) => openNotes(c, e.currentTarget); if ($('#editInfo')) $('#editInfo').onclick = () => openEditInfo(c);
+  if ($('#guardBtn')) $('#guardBtn').onclick = (e) => openGuard(c, e.currentTarget); if ($('#remindBtn')) $('#remindBtn').onclick = (e) => openRemind(c, e.currentTarget); if ($('#notesBtn')) $('#notesBtn').onclick = (e) => openNotes(c, e.currentTarget); if ($('#editInfo')) $('#editInfo').onclick = () => openEditInfo(c);
   try { connPaint(); } catch (e) {}
 }
 let softT = 0;
 function softStats() { if (softT) return; softT = setTimeout(() => { softT = 0; const c = cur(); if (!c) return; document.querySelectorAll('#statsbar [data-st]').forEach((n) => { n.textContent = statVal(c, n.dataset.st); }); }, 900); }
-$('#statsbar').addEventListener('click', (e) => { const g = e.target.closest('.gamelink'); if (g) { e.preventDefault(); openLink(g.dataset.url); } });
+$('#statsbar').addEventListener('click', (e) => { const g = e.target.closest('.gamelink'); if (g) { e.preventDefault(); openLink(g.dataset.url); return; } const t = e.target.closest('.stitle, .chan > b, .srow2 .hstats'); const c = cur(); if (t && c) openLink('https://www.twitch.tv/' + c.login); });
 
 /* ---------- Tabs ---------- */
 // Where a channel streams. Every tab gets a thin coloured line along its top edge in that service's colour; a streamer on two services gets two segments.
@@ -134,7 +136,7 @@ const platsOf = (c) => (c.platforms && c.platforms.length ? c.platforms : ['twit
 // Tabs in the order you added them, or live channels first (the button with two arrows beside the tabs)
 const isFav = (login) => !!(((S.settings.chanStyle || {})[login] || {}).fav);
 const tabOrder = () => { const l = [...S.chats.values()]; return l.sort((a, b) => (isFav(b.login) - isFav(a.login)) || (S.settings.tabSort === 'live' ? S.live.has(b.login) - S.live.has(a.login) : 0)); }; // favourites first, then live first if chosen
-function syncTabSort() { const b = $('#tabSort'); if (!b) return; const live = S.settings.tabSort === 'live'; b.classList.toggle('on', live); b.dataset.tip = live ? 'Live channels first. Click for the order you added them' : 'In the order you added them. Click to put live channels first'; b.setAttribute('aria-pressed', live); b.classList.toggle('hidden', S.chats.size < 2); }
+function syncTabSort() { const b = $('#tabSort'); if (!b) return; const live = S.settings.tabSort === 'live'; b.classList.toggle('on', live); b.dataset.tip = 'Sort by add order, or by live'; b.setAttribute('aria-pressed', live); b.classList.toggle('hidden', S.chats.size < 2); }
 function renderTabs() {
   const box = $('#tabs'); box.innerHTML = ''; syncTabSort();
   tabOrder().forEach((c) => {
@@ -423,7 +425,7 @@ function buildPip(login) {
   const p = S.settings.pip; S.pipLogin = login; tintPip(login);
   const opts = [`<option value="follow" ${p.channel === 'follow' ? 'selected' : ''}>Follow active tab</option>`, ...[...S.chats.values()].map((x) => `<option value="${x.login}" ${p.channel === x.login ? 'selected' : ''}>${esc(x.name)}</option>`)].join('');
   const b = (a, i, tip) => `<button data-p="${a}" data-tip="${tip}" aria-label="${tip}">${ico(i, 16)}</button>`;
-  $('#pip').innerHTML = `<div class="pip-head"><select data-p="channel" data-tip="Which stream to show">${opts}</select><button data-p="add" class="addst" data-tip="Add another stream (up to 4)" aria-label="Add another stream (up to 4)">${ico('plus', 14)}<span>Add Stream</span></button><span class="grow"></span>${b('size', 'size', 'Change size')}${b('corner', 'corner', 'Move to the next corner')}${b('dock', 'dockR', 'Snap to a side')}${b('close', 'x', 'Close stream')}</div><webview class="pip-view" src="${playerSrc(login)}" partition="persist:player" allowpopups></webview><div class="pip-foot"><div class="pip-grip" data-tip="Drag to resize"></div></div>`;
+  $('#pip').innerHTML = `<div class="pip-head"><select data-p="channel" data-tip="Which stream to show">${opts}</select><button data-p="add" class="addst" data-tip="Add another stream (up to 4)" aria-label="Add another stream (up to 4)">${ico('plus', 14)}<span>Add Stream</span></button><span class="grow"></span>${b('tw', 'ext', "Watch on Twitch. Streams in YappyChat don&#39;t earn watch streaks or channel points")}${b('size', 'size', 'Change size')}${b('corner', 'corner', 'Move to the next corner')}${b('dock', 'dockR', 'Snap to a side')}${b('close', 'x', 'Close stream')}</div><webview class="pip-view" src="${playerSrc(login)}" partition="persist:player" allowpopups></webview><div class="pip-foot"><div class="pip-grip" data-tip="Drag to resize"></div></div>`;
   const wv = $('#pip webview'); watchPlayerFullscreen(wv);
   // If the hosted player page cannot be reached, fall back to the local page (still Twitch's own unmodified player)
   wv.addEventListener('did-fail-load', (ev) => { if (ev.isMainFrame && ev.errorCode !== -3 && S.playerBase.hosted && !S.hostedFail && wv.src.startsWith(S.playerBase.hosted)) { S.hostedFail = true; dbg('hosted player failed, using local'); wv.src = playerSrc(login); } });
@@ -502,6 +504,7 @@ $('#dockSlot').addEventListener('pointermove', (e) => {
 $('#dockSlot').addEventListener('pointerup', () => { if (dockRz) { dockRz = null; saveSettings({ pip: S.settings.pip }); } });
 $('#pip').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-p]'); if (!b) return; const p = S.settings.pip, a = b.dataset.p;
+  if (a === 'tw') { if (S.pipLogin) openLink('https://www.twitch.tv/' + S.pipLogin); return; }
   if (a === 'close') savePip({ open: false });
   else if (a === 'add') mvAdd();
   else if (a === 'size') { if (p.dock) savePip({ dockSize: p.dockSize < 0.4 ? 0.5 : p.dockSize < 0.58 ? 0.66 : 0.33 }); else savePip({ w: p.w < 560 ? 640 : p.w < 740 ? 820 : 480 }); }

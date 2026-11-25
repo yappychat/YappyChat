@@ -23,6 +23,21 @@ const tlSave = () => slow('tl', () => saveSettings({ tl: Object.fromEntries(tlMa
 function noteList(login) { const n = (S.settings.notes || {})[login]; if (!n) return []; if (Array.isArray(n.list)) return n.list; return n.text ? [{ text: n.text, ts: n.ts || Date.now() }] : []; }
 function saveNotes(login, list) { const notes = { ...(S.settings.notes || {}) }; if (list.length) notes[login] = { text: list.map((x) => x.text).join('\n'), ts: list[list.length - 1].ts, list }; else delete notes[login]; saveSettings({ notes }); }
 const addNote = (login, text) => saveNotes(login, [...noteList(login), { text: String(text).slice(0, 1000), ts: Date.now() }]);
+/* Shared mod notes: a note shared with the mod team is kept on YappyChat's server (the privacy page says how) and only moderators of that channel can read it.
+   A channel's shared notes are fetched when a chat is open, and again when a user card is opened if they are more than 20 seconds old. */
+const tnTeam = (c) => !!(c && S.token && c.id && !S.settings.notMod && (isOwner(c) || (isMod(c) && modKnown(c))));
+const tnNotes = (c, uid) => (c && c.tn && c.tn.notes && uid && c.tn.notes[uid]) || [];
+const tnCall = (method, path, body) => cg.http({ url: ((window.Perks && Perks.API_URL) || 'https://yappy.chat') + path, method, headers: { Authorization: 'Bearer ' + S.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).catch(() => null);
+async function tnLoad(c, maxAge = 120000) {
+  if (!tnTeam(c)) return false; const t = c.tn || (c.tn = { notes: {}, at: 0, state: '' });
+  if (t.busy || Date.now() - t.at < maxAge) return false; t.busy = true;
+  try {
+    const r = await tnCall('GET', '/api/team-notes?channel=' + c.id); t.at = Date.now();
+    if (r && r.status === 200 && r.json) { t.notes = r.json.notes || {}; t.state = 'ok'; return true; }
+    t.state = r && r.status === 403 ? (r.json && r.json.error === 'scope' ? 'scope' : 'no') : 'down';
+  } finally { t.busy = false; }
+  return false;
+}
 const userEvents = (login) => tlMap().get(String(login).toLowerCase()) || [];
 
 /* ===== 2. Mod shift log: weekly totals per moderator ===== */
@@ -52,6 +67,7 @@ function recordMod(chan, kind, text, by, target, extra) {
   const am = actMsg(chan, kind, target, extra);
   if (dup) { if (by && !dup.by) { dup.by = by; dup.text = text; countShift(by, kind, chan); dashMod(chan, kind, by); } if (kind === 'untimeout' && dup.kind === 'unban') { dup.kind = 'untimeout'; dup.text = text; } if (dup.ue) { dup.ue.by = dup.by; dup.ue.text = dup.text; dup.ue.kind = dup.kind; if (am.msg && !dup.ue.msg) dup.ue.msg = am.msg; tlSave(); } if (am.msg && (!dup.msg || am.src === 'deleted' || am.src === 'automod')) { dup.msg = am.msg; dup.src = am.src; } if (sideShows('modact')) renderSideSoon(); return; }
   const entry = { ts: now, c: chan, kind, text, by: by || '', target: target || '', msg: am.msg || '', src: am.src || '' }; S.modlog.unshift(entry); if (S.modlog.length > 2000) S.modlog.length = 2000; // the whole session, for the history view
+  { const sc = S.chats.get(chan), k2 = { ban: 'bans', timeout: 'timeouts', delete: 'deletes', warn: 'warns' }[kind]; if (sc && sc.stat && k2) { sc.stat.team = sc.stat.team || {}; sc.stat.team[k2] = (sc.stat.team[k2] || 0) + 1; if (typeof softStats === 'function') softStats(); } } // the channel bar counts every moderator's actions
   if (kind !== 'mode') bump('modact');
   if (kind === 'timeout' && target) { const tc = S.chats.get(chan); if (tc) { (tc.toAt = tc.toAt || new Map()).set(String(target).toLowerCase(), Date.now()); } } // a badge on their next messages
   try { modSuggest(chan, kind, target, by); } catch (e) {}
@@ -68,7 +84,7 @@ const curLogin = () => S.active || '', curName = () => { const c = S.chats.get(S
 async function modUndo(i) {
   const x = S.modlog[i], c = x && S.chats.get(x.c); if (!x || !c || !x.target) return;
   const uid = await idOf(x.target); if (!uid) return err(`There's no Twitch account called "${x.target}". Check the spelling.`);
-  if (await unban(c, uid, x.target, false, x.kind === 'timeout')) { x.undone = true; renderSide(); }
+  if (await unban(c, uid, x.target, false, x.kind === 'timeout')) { x.undone = true; if (window.Usage && (x.kind === 'ban' || x.kind === 'timeout')) Usage.count('undoBan'); renderSide(); }
 }
 // Undo in Mod activity: lift that ban or timeout
 function modViewAct(a, i) { if (a === 'mv-undo') return modUndo(+i); }
@@ -79,17 +95,17 @@ function runMacro(m) {
   const c = cur(); if (!c) return err('Open a channel first.');
   const i = inp(); i.value = expandMacro(m.t, c); if (m.s) send(); else i.focus();
 }
-function openMacroMenu(anchor) {
+function openMacroMenu(anchor, target) {
   const list = macros().filter((m) => m.n && m.t);
   const n = el('div', 'stack', `<h3>Macros</h3>` + (list.length ? list.map((m, i) => `<button class="btn macroi" data-i="${i}"><b>${esc(m.n)}</b><span class="mprev">${esc(m.t.slice(0, 80))}</span>${m.c ? `<code class="mcmd">/${esc(m.c)}</code>` : ''}${m.s ? '<i class="jtag in">sends</i>' : ''}</button>`).join('') : '<div class="sd">No macros yet. Save messages you send often, like rules reminders or links.</div>') + `<button class="btn primary" id="mc-edit">${list.length ? 'Edit macros' : 'Create a macro'}</button>`);
   popover(n, anchor, { up: true });
-  n.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closePop(); if (b.id === 'mc-edit') return openSettings('Saved messages'); runMacro(list[+b.dataset.i]); };
+  n.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closePop(); if (b.id === 'mc-edit') return openSettings('Saved messages'); const m = list[+b.dataset.i]; if (target) { target.value = expandMacro(m.t, cur() || {}); target.focus(); if (m.s && target.form) target.form.requestSubmit(); return; } runMacro(m); };
 }
 function macroRows() {
   const l = macros(); if (!l.length) return '<div class="sd">No macros yet.</div>';
-  return l.map((m) => `<div class="mrow"><input class="mn" placeholder="Name" value="${esc(m.n)}" maxlength="30"><input class="mt" placeholder="Message… ({channel} {me} are filled in)" value="${esc(m.t)}" maxlength="500"><input class="mc" placeholder="/command" value="${m.c ? '/' + esc(m.c) : ''}" maxlength="21" spellcheck="false" aria-label="Command that sends this macro, like /blob" data-tip="Optional: type this in chat to use the macro"><label class="chk" data-tip="Send straight away instead of just filling the message box"><input type="checkbox" class="ms" ${m.s ? 'checked' : ''}> Send</label><button class="hx ibtn" data-tip="Remove">${ico('x', 14)}</button></div>`).join('');
+  return l.map((m) => `<div class="mrow"><input class="mn" placeholder="Name" value="${esc(m.n)}" maxlength="30"><input class="mt" placeholder="Message… ({channel} {me} are filled in)" value="${esc(m.t)}" maxlength="500"><input class="mc" placeholder="/command" value="${m.c ? '/' + esc(m.c) : ''}" maxlength="21" spellcheck="false" aria-label="Command that sends this macro" data-tip="Optional: type this in chat to use the macro"><label class="chk" data-tip="Send straight away instead of just filling the message box"><input type="checkbox" class="ms" ${m.s ? 'checked' : ''}> Send</label><button class="hx ibtn" data-tip="Remove">${ico('x', 14)}</button></div>`).join('');
 }
-const macroPane = () => `<div class="sd">Saved messages you can drop into chat from the lightning-bolt button next to the message box, or from the command palette (Ctrl+Shift+P). Use <code>{channel}</code> for the channel name and <code>{me}</code> for your name. Commands such as <code>/timeout</code> work too. Give a macro a command, like <code>/blob</code>, to use it by typing that in chat.</div><div id="mc-rows">${macroRows()}</div><button class="btn sm" id="mc-add" style="margin-top:8px">${ico('plus', 14)} Add macro</button>`;
+const macroPane = () => `<div class="sd">Saved messages you can drop into chat from the lightning-bolt button next to the message box, or from the command palette (Ctrl+Shift+P). Use <code>{channel}</code> for the channel name and <code>{me}</code> for your name.</div><div id="mc-rows">${macroRows()}</div><button class="btn sm" id="mc-add" style="margin-top:8px">${ico('plus', 14)} Add macro</button>`;
 function bindMacros(n) {
   const box = $('#mc-rows', n); if (!box) return;
   /* a macro's own command: letters, numbers and _ only, and never one of YappyChat's or Twitch's commands (those always win) */
@@ -108,7 +124,7 @@ function onRaid(c, p) {
   c.raid = { at: Date.now(), from: name, n }; c.raiders = new Set();
   if (c.banner) c.banner.remove();
   const mod = modKnown(c) && isMod(c);
-  const b = c.banner = el('div', 'banner raid', `<div class="bt">${ico('rocket', 15)} <span><b>Raid incoming</b> from ${esc(name)} with ${n.toLocaleString()} viewer${n === 1 ? '' : 's'}</span></div>${mod ? `<div class="btnrow"><button class="btn sm primary" data-b="shield">Shield Mode</button><button class="btn sm" data-b="fol">Followers-only 10m</button><button class="btn sm" data-b="emote">Emote-only</button><button class="btn sm ghost" data-b="x">Dismiss</button></div>` : '<div class="btnrow"><button class="btn sm ghost" data-b="x">Dismiss</button></div>'}`);
+  const b = c.banner = el('div', 'banner raid', `<div class="bt">${ico('rocket', 15)} <span><b>Raid incoming</b> from ${unm(name, t['msg-param-login'])} with ${n.toLocaleString()} viewer${n === 1 ? '' : 's'}</span></div>${mod ? `<div class="btnrow"><button class="btn sm primary" data-b="shield">Shield Mode</button><button class="btn sm" data-b="fol">Followers-only 10m</button><button class="btn sm" data-b="emote">Emote-only</button><button class="btn sm ghost" data-b="x">Dismiss</button></div>` : '<div class="btnrow"><button class="btn sm ghost" data-b="x">Dismiss</button></div>'}`);
   c.view.insertBefore(b, c.list);
   b.onclick = (e) => {
     const k = e.target.closest('button'); if (!k) return; const a = k.dataset.b;
@@ -271,7 +287,7 @@ function banRows() {
   const l = banList(); if (!l.length) return '<div class="sd">The list is empty. Add people from their user card, or paste names below.</div>';
   return l.map((b) => `<div class="mrow"><b class="grow">${esc(b.login)}</b><span class="sd grow2">${esc(b.reason || '')}</span><button class="hx ibtn" data-l="${esc(b.login)}" data-tip="Remove from list">${ico('x', 14)}</button></div>`).join('');
 }
-const banPane = (s) => srow('Ban automatically', 'When someone on the list speaks in a channel where you are a moderator, ban them straight away. Otherwise Yappy asks first.', sk('banAuto', !!s.banAuto)) + `<div class="sd" style="margin-top:8px">Stored on this computer only. Share it with other moderators with Copy and Paste.</div><div id="bn-rows" style="margin-top:8px">${banRows()}</div><div class="sl" style="margin-top:14px">Add names</div><textarea id="bn-text" rows="3" spellcheck="false" placeholder="one username per line" style="width:100%"></textarea><input id="bn-why" placeholder="Reason (optional)" maxlength="100" style="width:100%;margin-top:6px"><div class="btnrow" style="margin-top:8px"><button class="btn sm primary" id="bn-add">Add to list</button><button class="btn sm" id="bn-copy">Copy list</button></div><div class="sd" id="bn-st"></div>`;
+const banPane = (s) => `<div class="sd">Add usernames to this list to ban them as soon as they speak in a channel you moderate.</div>` + srow('Ban without asking', 'Off: Yappy asks first.', sk('banAuto', !!s.banAuto)) + `<div id="bn-rows" style="margin-top:8px">${banRows()}</div><div class="sl" style="margin-top:14px">Add names</div><textarea id="bn-text" rows="3" spellcheck="false" placeholder="one username per line" style="width:100%"></textarea><input id="bn-why" placeholder="Reason (optional)" maxlength="100" style="width:100%;margin-top:6px"><div class="btnrow" style="margin-top:8px"><button class="btn sm primary" id="bn-add">Add to list</button><button class="btn sm" id="bn-copy">Copy list</button></div><div class="sd" id="bn-st"></div>`;
 function bindBans(n) {
   const rows = $('#bn-rows', n); if (!rows) return;
   rows.onclick = (e) => { const x = e.target.closest('.hx'); if (!x) return; saveSettings({ banList: banList().filter((b) => b.login !== x.dataset.l) }); rows.innerHTML = banRows(); };
@@ -344,26 +360,13 @@ function extraKeys(e) {
   return false;
 }
 
-/* ===== Ban notes: after a ban without a reason, offer to keep a private note about why ===== */
-function askBanNote(c, login) {
-  const t = el('div', 'toast note', `<div class="nt-q">Why did you ban <b>${esc(login)}</b>? <span class="faint">Saved as a private note, only on this computer.</span></div><div class="nt-r"><input class="nt-i" placeholder="Reason (optional)" maxlength="200"><button class="nt-s">Save note</button><button class="nt-x faint">Skip</button></div>`);
-  $('#toasts').append(t); const i = $('.nt-i', t); i.focus(); let done = false;
-  const close = () => { if (done) return; done = true; t.classList.add('out'); setTimeout(() => t.remove(), 450); };
-  const save = () => {
-    const v = i.value.trim(); if (!v) return close();
-    addNote(login, `Banned in ${c.name}: ${v}`);
-    userEvent(login, c.login, 'note', 'Ban note: ' + v); toast('Note saved', { ms: 1600 }); close();
-  };
-  $('.nt-s', t).onclick = save; $('.nt-x', t).onclick = close; i.onkeydown = (e) => { if (e.key === 'Enter') save(); else if (e.key === 'Escape') close(); };
-  setTimeout(close, 30000);
-}
 
 /* ===== Timestamp format setting ===== */
-const TS_PRESETS = ['HH:MM:SS', 'HH:MM:ss', 'HH:MM', 'H:MM:SS', 'HH:MM:SS P', 'hh:MM'];
-const tsPane = (s) => `<div class="srow"><div><div class="sl">Timestamp format</div><div class="sd">H = hour, M = minute, S = second. Two letters pad with a zero (<code>HH</code> = 09, <code>H</code> = 9). <b>Capital letters are bright, lower case letters are softer</b>, so <code>HH:MM:ss</code> dims the seconds. Add <code>P</code> for AM/PM (12-hour clock).</div><div class="btnrow" style="margin-top:8px">${TS_PRESETS.map((p) => `<button class="btn sm" data-ts="${p}">${p}</button>`).join('')}</div></div><div class="tsbox"><input id="ts-fmt" aria-label="Timestamp format" value="${esc(s.tsFormat || 'HH:MM:SS')}" maxlength="24" spellcheck="false"><span class="ts" id="ts-prev">${fmtTs(Date.now(), s.tsFormat)}</span></div></div>`;
+const TS_PRESETS = ['HH:MM:ss', 'HH:MM:SS', 'HH:MM', 'H:MM:SS', 'HH:MM:SS P', 'hh:MM'];
+const tsPane = (s) => `<div class="srow"><div><div class="sl">Timestamp format</div><div class="sd">H hour, M minute, S second. Lower case is shown softer, and P adds AM/PM. Click the box for ready-made formats.</div></div><div class="tsbox"><input id="ts-fmt" aria-label="Timestamp format" aria-haspopup="listbox" value="${esc(s.tsFormat || 'HH:MM:ss')}" maxlength="24" spellcheck="false" autocomplete="off"><div class="tsmenu hidden" role="listbox">${TS_PRESETS.map((p) => `<button type="button" role="option" data-ts="${p}"><code>${p}</code><span class="ts">${fmtTs(Date.now(), p)}</span></button>`).join('')}</div><span class="ts" id="ts-prev">${fmtTs(Date.now(), s.tsFormat)}</span></div></div>`;
 function bindTs(n) {
-  const i = $('#ts-fmt', n); if (!i) return; const set = (v) => { i.value = v; saveSettings({ tsFormat: v.trim() || 'HH:MM:SS' }); $('#ts-prev', n).innerHTML = fmtTs(Date.now(), S.settings.tsFormat); };
-  i.oninput = () => set(i.value); n.querySelectorAll('[data-ts]').forEach((b) => (b.onclick = () => set(b.dataset.ts)));
+  const i = $('#ts-fmt', n); if (!i) return; const set = (v) => { i.value = v; saveSettings({ tsFormat: v.trim() || 'HH:MM:ss' }); $('#ts-prev', n).innerHTML = fmtTs(Date.now(), S.settings.tsFormat); };
+  i.oninput = () => set(i.value); const mn = n.querySelector('.tsmenu'); n.querySelectorAll('[data-ts]').forEach((b) => { b.onmousedown = (e) => e.preventDefault(); b.onclick = () => { set(b.dataset.ts); mn.classList.add('hidden'); }; }); if (mn) { i.onfocus = () => mn.classList.remove('hidden'); i.onblur = () => mn.classList.add('hidden'); i.addEventListener('keydown', (e) => { if (e.key === 'Escape') mn.classList.add('hidden'); }); }
 }
 
 /* ===== Settings > Filters: the word/name blacklist and Ban on sight together ===== */
@@ -566,7 +569,7 @@ function openChanMenu(login, anchor) {
   const n = el('div', 'stack chanmenu', `<h3>${esc(c.name)}</h3>
     <div class="swatches">${CHAN_COLORS.map((x) => `<button class="swt${cur === x ? ' on' : ''}" data-col="${x}" style="--c:${x}" aria-label="Colour ${x}"></button>`).join('')}<label class="swt custom" data-tip="Pick any colour"><input type="color" id="cm-c" value="${cur || '#5b8cff'}" aria-label="Pick any colour"></label><button class="swt none" id="cm-none" data-tip="Default colour" aria-label="Default colour">${ico('x', 12)}</button></div>` +
     row('Sound', `<span class="cm-snd"><select id="cm-s" aria-label="Notification sound in this channel">${tones.map(([v, l]) => `<option value="${v}"${v === snd ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select><button class="ibtn sm" id="cm-p" data-tip="Play" aria-label="Play">${ico('vol', 14)}</button></span>`, 'Overrides your sound settings for alerts in this channel') +
-    row('Text size', `<div class="seg cmsize">${CHAT_SIZES.map(([f, l]) => `<button data-fs="${f}" class="${(st.fs || 1) === f ? 'on' : ''}" aria-label="${l}">${l === 'Normal' ? 'A' : l === 'Smaller' ? 'A−' : 'A+'}</button>`).join('')}</div>`) +
+    row('Text size', `<div class="seg cmsize"><button data-fsd="-1" aria-label="Smaller text" data-tip="Smaller">A−</button><button data-fsd="0" class="fsv" aria-label="Normal size" data-tip="Back to normal">${Math.round((st.fs || 1) * 100)}%</button><button data-fsd="1" aria-label="Larger text" data-tip="Larger">A+</button></div>`) +
     row('Keep at the front', sw('cm-fav', !!st.fav), 'Favourite: this tab stays first, whichever way the tabs are sorted') +
     row('Mute', sw('cm-mute', !!st.mute), 'No sounds, buzz or tab flashing. Still logged and listed in Activity') +
     (modKnown(c) && isMod(c) ? row('Mod buttons', sw('cm-mod', !st.noMod), 'Delete, timeout, ban and warn beside each message. Off: hidden in this channel only') : ''));
@@ -577,7 +580,11 @@ function openChanMenu(login, anchor) {
   $('#cm-none', n).onclick = () => { setChanStyle(login, { color: '' }); paint(); };
   $('#cm-mute', n).onchange = (ev) => setChanStyle(login, { mute: ev.target.checked });
   $('#cm-fav', n).onchange = (ev) => { setChanStyle(login, { fav: ev.target.checked }); renderTabs(); };
-  n.querySelectorAll('[data-fs]').forEach((b) => (b.onclick = () => { setChanStyle(login, { fs: +b.dataset.fs === 1 ? 0 : +b.dataset.fs }); n.querySelectorAll('[data-fs]').forEach((x) => x.classList.toggle('on', x === b)); }));
+  n.querySelectorAll('[data-fsd]').forEach((b) => (b.onclick = () => {
+    const now = ((S.settings.chanStyle || {})[login] || {}).fs || 1, i = CHAT_SIZES.reduce((bi, v, k) => (Math.abs(v - now) < Math.abs(CHAT_SIZES[bi] - now) ? k : bi), 3), d = +b.dataset.fsd;
+    const f = d ? CHAT_SIZES[Math.max(0, Math.min(CHAT_SIZES.length - 1, i + d))] : 1; setChanStyle(login, { fs: f === 1 ? 0 : f });
+    $('.fsv', n).textContent = Math.round(f * 100) + '%'; n.querySelector('[data-fsd="-1"]').disabled = f <= CHAT_SIZES[0]; n.querySelector('[data-fsd="1"]').disabled = f >= CHAT_SIZES[CHAT_SIZES.length - 1];
+  }));
   if ($('#cm-mod', n)) $('#cm-mod', n).onchange = (ev) => { setChanStyle(login, { noMod: !ev.target.checked }); c.view.classList.toggle('nomodbtn', !ev.target.checked); };
   $('#cm-s', n).onchange = (e) => { setChanStyle(login, { sound: e.target.value }); const v = e.target.value; if (v && v !== 'none') playSound(v, 'highlight'); };
   $('#cm-p', n).onclick = () => { const v = $('#cm-s', n).value; if (v === 'none') return; playSound(v || (S.settings.soundTone || {}).highlight || 'ping', 'highlight'); };
@@ -605,7 +612,7 @@ function showWhatsNew(ver, since) {
 async function checkWhatsNew() {
   let v = ''; try { v = await cg.version(); } catch (e) { return; } if (!v) return;
   if (S.settings.seenVersion !== v) {
-    const prev = S.settings.seenVersion, first = !prev && !S.settings.tourDone;
+    const prev = S.settings.seenVersion === '1.0.0' ? '0.20.1' : S.settings.seenVersion, first = !prev && !S.settings.tourDone; /* the first 1.0.0 download was incomplete and never showed the 1.0 notes, so people coming from it see them now */
     saveSettings(first ? { seenVersion: v, newRead: v } : { seenVersion: v, newFrom: prev || '', newAt: Date.now() });
   }
   if (S.settings.newRead === v || Date.now() - (+S.settings.newAt || 0) > 14 * 864e5) return;
@@ -695,6 +702,7 @@ function onRename({ from, to, at }) {
   if (notes[from] && !notes[to]) { p.notes = { ...notes, [to]: notes[from] }; delete p.notes[from]; }
   const w = S.settings.watch || []; if (w.includes(from)) p.watch = [...new Set(w.map((x) => (x === from ? to : x)))];
   const bl = S.settings.banList || []; if (bl.some((x) => x.login === from)) p.banList = bl.map((x) => (x.login === from ? { ...x, login: to } : x));
+  const nk = S.settings.nicks || {}; if (Object.values(nk).some((x) => x.login === from)) p.nicks = Object.fromEntries(Object.entries(nk).map(([k, x]) => [k, x.login === from ? { ...x, login: to, name: to } : x])); /* a nickname follows them to their new name */
   if (Object.keys(p).length) { saveSettings(p); if (p.watch) compileHl(); }
 }
 
